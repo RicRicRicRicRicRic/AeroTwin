@@ -1,0 +1,161 @@
+# AeroTwin AI - Cline Rules & Development Guidelines
+
+## Project Overview
+**AeroTwin AI** is an intelligent structural health monitoring framework and desktop application designed for post-disaster building inspections using UAV imagery. It features an Electron-wrapped React/Vite frontend communicating with a FastAPI Python backend running custom computer vision models (material segmentation, structural element detection, crack mapping) and a seismic vulnerability scoring engine.
+
+---
+
+## Tech Stack & Architecture
+* **Desktop Wrapper:** Electron (`electron/main.js`, `electron/preload.js`)
+* **Frontend:** React, Vite, Tailwind CSS / UI components (`frontend/`)
+* **Backend:** Python, FastAPI, Uvicorn (`backend/app/`)
+* **ML / Processing Engine:** PyTorch, OpenCV, NumPy, Custom `.pt` models (`backend/app/models/`, `backend/app/services/`)
+* **Database / Storage:** SQLite (`data/aerotwin.db`), local file storage for raw/processed images (`data/`)
+
+---
+
+## Coding Standards & Conventions
+
+### 1. General Principles
+* **Modular Design:** Keep services strictly separated. Machine learning model inference must live in `backend/app/services/` or `models/`, completely decoupled from API routing and frontend state.
+* **Error Handling:** Implement robust error catching on both the FastAPI endpoints (returning standard HTTP exceptions with clear detail schemas) and the React frontend (handling network drops, processing timeouts, or missing image inputs).
+* **Asynchronous Operations:** Use Python `async/def` for I/O-bound FastAPI endpoints, but offload heavy CPU/GPU-bound image processing and model inference tasks to background tasks or worker threads to prevent blocking the event loop.
+* **Model Fallbacks & Weight Management:** If custom `.pt` model weights are missing from `backend/app/models/weights/`, FastAPI endpoints must return a clean, descriptive HTTP 503 error rather than failing silently or throwing unhandled Python tracebacks.
+
+### 2. Backend (Python / FastAPI)
+* **Type Hinting:** Use strict type annotations (`typing`, Pydantic models) for all request bodies, responses, and service methods, located in `backend/app/schemas/`.
+* **Path Management:** Use `pathlib` for all file system operations involving image inputs (`data/inputs/`), intermediate outputs (`data/processed/`), and model weights (`backend/app/models/weights/`).
+* **UAV Image Tiling & Memory Management:** For high-resolution UAV orthomosaics and large drone imagery, implement sliding-window tiling or patch-based inference with overlap blending to manage GPU/CPU memory efficiently and prevent Out-Of-Memory (OOM) crashes.
+* **Testing:** Write unit and integration tests using `pytest` inside the `backend/tests/` directory covering preprocessing, crack detection, and seismic calculation logic.
+
+### 3. Frontend (React / Vite / Electron)
+* **State Management:** Keep clean state boundaries between local UI states and API communication services (`frontend/src/services/api.js`).
+* **Component Architecture:** Build modular, reusable components for visual inspection views (e.g., `MaterialMap.jsx`, `CrackViewer.jsx`, `ScoreCard.jsx`).
+* **IPC Communication:** Ensure secure context isolation if communicating directly via Electron IPC bridges; otherwise, treat the Electron window as a standard web container communicating with the local FastAPI sidecar process.
+
+---
+
+## Project Structure Reference
+When creating or modifying files, strictly adhere to the established project file layout:
+Project file structure:
+AeroTwin-AI/
+│
+├── backend/
+│   │
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── init.py
+│   │   │   ├── processing.py
+│   │   │   ├── assessment.py
+│   │   │   └── reports.py
+│   │   │
+│   │   ├── core/
+│   │   │   ├── init.py
+│   │   │   ├── config.py
+│   │   │   └── database.py
+│   │   │
+│   │   ├── models/
+│   │   │   ├── init.py
+│   │   │   ├── material_segmenter.py
+│   │   │   ├── structural_element_detector.py
+│   │   │   ├── crack_detector.py
+│   │   │   └── weights/
+│   │   │       ├── material_model.pt
+│   │   │       ├── crack_model.pt
+│   │   │       └── ...
+│   │   │
+│   │   ├── services/
+│   │   │   ├── init.py
+│   │   │   ├── uav_preprocessor.py
+│   │   │   ├── crack_mapper.py
+│   │   │   ├── defect_metrics.py
+│   │   │   ├── seismic_calculator.py
+│   │   │   └── report_generator.py
+│   │   │
+│   │   ├── schemas/
+│   │   │   ├── processing.py
+│   │   │   ├── assessment.py
+│   │   │   └── reports.py
+│   │   │
+│   │   └── main.py
+│   │
+│   ├── tests/
+│   │   ├── test_preprocessing.py
+│   │   ├── test_material_segmentation.py
+│   │   ├── test_crack_detection.py
+│   │   ├── test_crack_mapping.py
+│   │   └── test_seismic_calculator.py
+│   │
+│   ├── requirements.txt
+│   └── run_backend.py
+│
+├── frontend/
+│   │
+│   ├── public/
+│   │
+│   ├── src/
+│   │   ├── assets/
+│   │   ├── components/
+│   │   │   ├── ImageUploader.jsx
+│   │   │   ├── MaterialMap.jsx
+│   │   │   ├── CrackViewer.jsx
+│   │   │   ├── StructuralElementViewer.jsx
+│   │   │   ├── ScoreCard.jsx
+│   │   │   └── VulnerabilityBadge.jsx
+│   │   │
+│   │   ├── pages/
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── InspectionView.jsx
+│   │   │   ├── AssessmentView.jsx
+│   │   │   └── ReportView.jsx
+│   │   │
+│   │   ├── services/
+│   │   │   └── api.js
+│   │   │
+│   │   ├── App.jsx
+│   │   └── main.jsx
+│   │
+│   ├── package.json
+│   └── vite.config.js
+│
+├── data/
+│   ├── inputs/
+│   │   ├── raw_images/
+│   │   └── orthomosaics/
+│   │
+│   ├── processed/
+│   │   ├── preprocessed/
+│   │   ├── material_masks/
+│   │   ├── structural_elements/
+│   │   └── crack_maps/
+│   │
+│   ├── outputs/
+│   │   ├── assessments/
+│   │   ├── reports/
+│   │   └── visualizations/
+│   │
+│   └── aerotwin.db
+│
+├── electron/
+│   ├── main.js
+│   └── preload.js
+│
+├── assets/
+│   ├── icons/
+│   └── installers/
+│
+├── docs/
+│   ├── architecture/
+│   ├── methodology/
+│   └── sample_outputs/
+│
+├── README.md
+└── package.json
+
+
+---
+
+## Key Domain Rules (AeroTwin AI Logic)
+1. **Pipeline Order:** UAV Video Acquisition → Video Storage → Video Import → Frame Extraction → Frame Preprocessing → AI-Based Analysis → Cross-Frame Result Aggregation → Structural Assessment → Report Generation
+2. **Data Integrity:** Never overwrite raw images in `data/inputs/raw_images/`. All outputs, masks, and crops must be safely written to their corresponding subdirectories in `data/processed/` or `data/outputs/`.
+3. **Reproducibility, Metrics & Determinism:** Ensure model inferences and seismic score calculations are reproducible by fixing random seeds where applicable. Explicitly log processing parameters, inference runtimes, and evaluation metrics (e.g., Intersection over Union for material masks, F1-scores for crack detection) into `aerotwin.db` to support your thesis results chapter.

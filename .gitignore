@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data: database artifacts and imagery must never be committed.
+# (.gitkeep files keep the directory layout tracked in git.)
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# Node / Electron
+node_modules/
+dist/
+release/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
