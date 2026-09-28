@@ -12,6 +12,10 @@ numpy==2.4.6
 # enough disk space is available — the code auto-detects the device.
 torch==2.14.0
 
+# Report generation (Phase 4: PDF inspection reports)
+reportlab==5.0.1
+pillow==12.3.0
+
 # Testing
 pytest==9.1.1
 httpx==0.28.1

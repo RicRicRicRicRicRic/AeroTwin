@@ -83,6 +83,53 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs (status)",
     "CREATE INDEX IF NOT EXISTS idx_processing_jobs_video ON processing_jobs (video_filename)",
     "CREATE INDEX IF NOT EXISTS idx_defect_metrics_job ON frame_defect_metrics (job_id)",
+    # --- Phase 4: structural assessment & reports -------------------------
+    """
+    CREATE TABLE IF NOT EXISTS building_profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        structure_age_years REAL NOT NULL,
+        construction_type TEXT NOT NULL,
+        num_stories INTEGER NOT NULL,
+        code_compliance TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS assessments (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        building_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        result_json TEXT,
+        vulnerability_score REAL,
+        classification TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (profile_id) REFERENCES building_profiles (id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reports (
+        id TEXT PRIMARY KEY,
+        assessment_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        report_format TEXT NOT NULL,
+        json_path TEXT,
+        pdf_path TEXT,
+        assessment_json_path TEXT,
+        size_bytes INTEGER,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (assessment_id) REFERENCES assessments (id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_assessments_status ON assessments (status)",
+    "CREATE INDEX IF NOT EXISTS idx_reports_assessment ON reports (assessment_id)",
 )
 
 #: Additive migrations for databases created before a column existed
