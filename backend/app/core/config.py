@@ -43,6 +43,7 @@ class Settings:
     material_masks_dir: Path
     structural_elements_dir: Path
     crack_maps_dir: Path
+    aggregated_dir: Path
     outputs_dir: Path
     weights_dir: Path
     host: str
@@ -75,6 +76,7 @@ class Settings:
             material_masks_dir=data_dir / "processed" / "material_masks",
             structural_elements_dir=data_dir / "processed" / "structural_elements",
             crack_maps_dir=data_dir / "processed" / "crack_maps",
+            aggregated_dir=data_dir / "processed" / "aggregated",
             outputs_dir=data_dir / "outputs",
             weights_dir=Path(
                 os.environ.get("AEROTWIN_WEIGHTS_DIR", BACKEND_DIR / "app" / "models" / "weights")
@@ -96,6 +98,7 @@ class Settings:
             self.material_masks_dir,
             self.structural_elements_dir,
             self.crack_maps_dir,
+            self.aggregated_dir,
             self.outputs_dir / "assessments",
             self.outputs_dir / "reports",
             self.outputs_dir / "visualizations",

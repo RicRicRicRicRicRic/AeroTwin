@@ -130,6 +130,65 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_assessments_status ON assessments (status)",
     "CREATE INDEX IF NOT EXISTS idx_reports_assessment ON reports (assessment_id)",
+    # --- Phase 6: cross-frame aggregation & global defect registry ----------
+    """
+    CREATE TABLE IF NOT EXISTS global_crack_defects (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        source_crack_job_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        observation_count INTEGER NOT NULL,
+        first_frame_index INTEGER NOT NULL,
+        last_frame_index INTEGER NOT NULL,
+        first_frame_filename TEXT NOT NULL,
+        last_frame_filename TEXT NOT NULL,
+        union_x INTEGER NOT NULL,
+        union_y INTEGER NOT NULL,
+        union_width INTEGER NOT NULL,
+        union_height INTEGER NOT NULL,
+        pixel_count_max REAL NOT NULL,
+        pixel_count_mean REAL NOT NULL,
+        length_px_max REAL NOT NULL,
+        length_px_mean REAL NOT NULL,
+        width_px_max REAL NOT NULL,
+        width_px_mean REAL NOT NULL,
+        mean_match_iou REAL,
+        provenance_json TEXT NOT NULL,
+        computed_at TEXT NOT NULL,
+        FOREIGN KEY (job_id) REFERENCES processing_jobs (id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS global_element_instances (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        source_crack_job_id TEXT,
+        source_element_job_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        observation_count INTEGER NOT NULL,
+        first_frame_index INTEGER NOT NULL,
+        last_frame_index INTEGER NOT NULL,
+        first_frame_filename TEXT NOT NULL,
+        last_frame_filename TEXT NOT NULL,
+        union_x INTEGER NOT NULL,
+        union_y INTEGER NOT NULL,
+        union_width INTEGER NOT NULL,
+        union_height INTEGER NOT NULL,
+        confidence_max REAL,
+        confidence_mean REAL,
+        crack_density_max REAL,
+        mean_match_iou REAL,
+        provenance_json TEXT NOT NULL,
+        computed_at TEXT NOT NULL,
+        FOREIGN KEY (job_id) REFERENCES processing_jobs (id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_global_cracks_job ON global_crack_defects (job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_global_cracks_source "
+    "ON global_crack_defects (source_crack_job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_global_elements_job ON global_element_instances (job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_global_elements_source "
+    "ON global_element_instances (source_element_job_id)",
 )
 
 #: Additive migrations for databases created before a column existed

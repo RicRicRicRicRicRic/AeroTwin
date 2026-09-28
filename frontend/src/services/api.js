@@ -22,6 +22,7 @@ export const JOB_TYPES = {
   materialSegmentation: 'material_segmentation',
   elementDetection: 'element_detection',
   crackMapping: 'crack_mapping',
+  crossFrameAggregation: 'cross_frame_aggregation',
 };
 
 export class ApiError extends Error {
@@ -188,6 +189,20 @@ export const api = {
       method: 'POST',
       body: compact({ frames_path: framesPath, crack_threshold: crackThreshold }),
     }),
+
+  // --- cross-frame aggregation (global defect registry) ---------------------
+  startAggregation: ({ crackJobId, elementJobId, iouThreshold, maxFrameGap, includeObservations }) =>
+    request('/api/processing/aggregate-results', {
+      method: 'POST',
+      body: compact({
+        crack_job_id: crackJobId,
+        element_job_id: elementJobId,
+        iou_threshold: iouThreshold,
+        max_frame_gap: maxFrameGap,
+        include_observations: includeObservations,
+      }),
+    }),
+  getAggregation: (jobId) => request(`/api/processing/aggregations/${encodeURIComponent(jobId)}`),
 
   // --- building profiles & assessments ------------------------------------
   listProfiles: () => request('/api/assessment/profiles'),

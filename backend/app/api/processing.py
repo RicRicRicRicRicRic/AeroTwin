@@ -25,6 +25,7 @@ from ..core.config import settings
 from ..core.database import create_job_record, get_job_record, job_record_to_dict, list_job_records
 from ..models import crack_detector, material_segmenter, structural_element_detector
 from ..models.base import ModelLoadError, ModelWeightsMissingError
+from ..schemas.defect_registry import AggregationRequest, AggregationRun
 from ..schemas.processing import (
     ArtifactEntry,
     ArtifactListing,
@@ -33,6 +34,7 @@ from ..schemas.processing import (
     ExtractionJobResponse,
     FrameExtractionRequest,
     FramesJobRequest,
+    JobStatus,
     MaterialSegmentationRequest,
     ProcessingJobResponse,
     VideoIngestRequest,
@@ -41,6 +43,11 @@ from ..schemas.processing import (
 )
 from ..services import uav_preprocessor
 from ..services.crack_mapper import run_crack_mapping_job
+from ..services.cross_frame_aggregator import (
+    JOB_TYPE_AGGREGATION,
+    load_aggregation_run,
+    run_aggregation_job,
+)
 from ..services.uav_preprocessor import (
     UnsupportedVideoFormatError,
     VideoIngestError,
@@ -256,6 +263,85 @@ async def map_cracks(
 
 
 # ---------------------------------------------------------------------------
+# Phase 6: cross-frame aggregation & global defect registry
+# ---------------------------------------------------------------------------
+async def _require_completed_job(job_id: str, expected_type: str) -> str:
+    """Ensure a source job exists, has the right type, and is completed.
+
+    Raises HTTP 404 for an unknown/wrong-type job and HTTP 409 when it has not
+    finished yet — both before an aggregation job row is created.
+    """
+    row = await run_in_threadpool(get_job_record, job_id)
+    if row is None or str(row["job_type"]) != expected_type:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No completed {expected_type} job with id {job_id}",
+        )
+    if str(row["status"]) != JobStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{expected_type} job {job_id} is {row['status']}; "
+                "aggregation requires a completed job"
+            ),
+        )
+    return str(row["video_filename"])
+
+
+@router.post(
+    "/aggregate-results",
+    response_model=AggregationRun,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue a cross-frame result aggregation job",
+)
+async def aggregate_results(
+    request: AggregationRequest,
+    background_tasks: BackgroundTasks,
+) -> AggregationRun:
+    """Deduplicate per-frame detections into global defect entities (background)."""
+    video_filename = await _require_completed_job(
+        request.crack_job_id, crack_detector.JOB_TYPE_CRACK_MAPPING
+    )
+    if request.element_job_id:
+        await _require_completed_job(
+            request.element_job_id, structural_element_detector.JOB_TYPE_ELEMENT_DETECTION
+        )
+    job_id = await run_in_threadpool(
+        create_job_record,
+        job_type=JOB_TYPE_AGGREGATION,
+        video_filename=video_filename,
+        params_json=request.model_dump_json(),
+    )
+    background_tasks.add_task(run_aggregation_job, job_id, request.crack_job_id, request)
+    run = await run_in_threadpool(load_aggregation_run, job_id)
+    if run is None:  # pragma: no cover — defensive, mirrors the extraction route
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Job {job_id} disappeared immediately after creation",
+        )
+    return run
+
+
+@router.get(
+    "/aggregations/{job_id}",
+    response_model=AggregationRun,
+    summary="Get a cross-frame aggregation run and its global defect registry",
+)
+async def get_aggregation(job_id: str) -> AggregationRun:
+    """Return the aggregation status, summary metrics, and global entities.
+
+    Raises HTTP 404 for an unknown id or an id that is not an aggregation run.
+    """
+    run = await run_in_threadpool(load_aggregation_run, job_id)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown aggregation job: {job_id}",
+        )
+    return run
+
+
+# ---------------------------------------------------------------------------
 # Phase 5: artifact browsing for the inspection viewers
 # ---------------------------------------------------------------------------
 class ArtifactCategory(str, Enum):
@@ -265,6 +351,7 @@ class ArtifactCategory(str, Enum):
     MATERIAL_MASKS = "material_masks"
     STRUCTURAL_ELEMENTS = "structural_elements"
     CRACK_MAPS = "crack_maps"
+    AGGREGATED = "aggregated"
     REPORTS = "reports"
     ASSESSMENTS = "assessments"
 
@@ -284,6 +371,7 @@ def _artifact_root(category: ArtifactCategory) -> Path:
         ArtifactCategory.MATERIAL_MASKS: settings.material_masks_dir,
         ArtifactCategory.STRUCTURAL_ELEMENTS: settings.structural_elements_dir,
         ArtifactCategory.CRACK_MAPS: settings.crack_maps_dir,
+        ArtifactCategory.AGGREGATED: settings.aggregated_dir,
         ArtifactCategory.REPORTS: settings.outputs_dir / "reports",
         ArtifactCategory.ASSESSMENTS: settings.outputs_dir / "assessments",
     }
