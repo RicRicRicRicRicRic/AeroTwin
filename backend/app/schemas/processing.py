@@ -269,3 +269,31 @@ class AnalysisRunManifest(BaseModel):
     started_at: datetime
     completed_at: datetime
 
+
+# ---------------------------------------------------------------------------
+# Phase 5: artifact browsing for the inspection viewers
+# ---------------------------------------------------------------------------
+class ArtifactEntry(BaseModel):
+    """One file or directory inside a managed output directory."""
+
+    name: str
+    relative_path: str = Field(description="Path relative to the category root.")
+    url: str | None = Field(
+        default=None,
+        description="Relative API URL streaming the file (None for directories).",
+    )
+    is_dir: bool
+    size_bytes: int
+    modified_at: datetime
+
+
+class ArtifactListing(BaseModel):
+    """Directory listing for a managed output category (frontend browser)."""
+
+    category: str
+    path: str
+    parent: str | None = Field(
+        default=None, description="Parent path relative to the category root, if any."
+    )
+    items: list[ArtifactEntry]
+

@@ -11,10 +11,14 @@ so the event loop is never blocked (AeroTwin async rule).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from ..core.config import settings
@@ -22,6 +26,8 @@ from ..core.database import create_job_record, get_job_record, job_record_to_dic
 from ..models import crack_detector, material_segmenter, structural_element_detector
 from ..models.base import ModelLoadError, ModelWeightsMissingError
 from ..schemas.processing import (
+    ArtifactEntry,
+    ArtifactListing,
     CrackMappingRequest,
     ElementDetectionRequest,
     ExtractionJobResponse,
@@ -247,3 +253,140 @@ async def map_cracks(
         runner=run_crack_mapping_job,
         background_tasks=background_tasks,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: artifact browsing for the inspection viewers
+# ---------------------------------------------------------------------------
+class ArtifactCategory(str, Enum):
+    """Managed output directories that the desktop UI may read."""
+
+    FRAMES = "frames"
+    MATERIAL_MASKS = "material_masks"
+    STRUCTURAL_ELEMENTS = "structural_elements"
+    CRACK_MAPS = "crack_maps"
+    REPORTS = "reports"
+    ASSESSMENTS = "assessments"
+
+
+#: File types the artifact API is allowed to stream to the renderer.
+ALLOWED_ARTIFACT_SUFFIXES: frozenset[str] = frozenset(
+    {".png", ".jpg", ".jpeg", ".json", ".pdf", ".txt", ".md"}
+)
+#: Safety cap on directory listings returned to the UI.
+MAX_ARTIFACT_ITEMS: int = 500
+
+
+def _artifact_root(category: ArtifactCategory) -> Path:
+    """Map a category onto its managed directory (single source of truth)."""
+    roots: dict[ArtifactCategory, Path] = {
+        ArtifactCategory.FRAMES: settings.frames_dir,
+        ArtifactCategory.MATERIAL_MASKS: settings.material_masks_dir,
+        ArtifactCategory.STRUCTURAL_ELEMENTS: settings.structural_elements_dir,
+        ArtifactCategory.CRACK_MAPS: settings.crack_maps_dir,
+        ArtifactCategory.REPORTS: settings.outputs_dir / "reports",
+        ArtifactCategory.ASSESSMENTS: settings.outputs_dir / "assessments",
+    }
+    return roots[category]
+
+
+def _artifact_url(category: ArtifactCategory, relative_path: str) -> str:
+    """Relative API URL streaming one artifact file."""
+    return (
+        f"{router.prefix}/artifacts/file"
+        f"?category={category.value}&path={quote(relative_path, safe='')}"
+    )
+
+
+@router.get(
+    "/artifacts/listing",
+    response_model=ArtifactListing,
+    summary="List a managed output directory",
+)
+async def list_artifacts(
+    category: ArtifactCategory,
+    path: str = Query(default="", description="Path relative to the category root."),
+) -> ArtifactListing:
+    """Browse frames, masks, crack maps, or report files for the UI viewers."""
+    root = _artifact_root(category)
+    if not root.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact category not available: {category.value}",
+        )
+    try:
+        directory = settings.resolve_managed_path(root, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not directory.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Not a directory: {directory}",
+        )
+
+    cleaned = (path or "").strip().replace("\\", "/").strip("/")
+    items: list[ArtifactEntry] = []
+    for entry in sorted(directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower()))[
+        :MAX_ARTIFACT_ITEMS
+    ]:
+        relative = entry.relative_to(root).as_posix()
+        stat = entry.stat()
+        items.append(
+            ArtifactEntry(
+                name=entry.name,
+                relative_path=relative,
+                url=None if entry.is_dir() else _artifact_url(category, relative),
+                is_dir=entry.is_dir(),
+                size_bytes=stat.st_size if entry.is_file() else 0,
+                modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            )
+        )
+
+    parent: str | None = None
+    if cleaned:
+        parent_path = Path(cleaned).parent.as_posix()
+        parent = "" if parent_path == "." else parent_path
+    return ArtifactListing(
+        category=category.value,
+        path=cleaned,
+        parent=parent,
+        items=items,
+    )
+
+
+@router.get(
+    "/artifacts/file",
+    summary="Stream one artifact file",
+    response_class=FileResponse,
+)
+async def get_artifact_file(
+    category: ArtifactCategory,
+    path: str = Query(description="File path relative to the category root."),
+) -> FileResponse:
+    """Stream a mask/map/report file; traversal-safe and type-restricted."""
+    if not path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="path is required"
+        )
+    root = _artifact_root(category)
+    try:
+        target = settings.resolve_managed_path(root, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not target.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Not a file: {target}"
+        )
+    if target.suffix.lower() not in ALLOWED_ARTIFACT_SUFFIXES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Unsupported artifact type {target.suffix!r}; allowed: "
+                f"{sorted(ALLOWED_ARTIFACT_SUFFIXES)}"
+            ),
+        )
+    return FileResponse(str(target), filename=target.name)

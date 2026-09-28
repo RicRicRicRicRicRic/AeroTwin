@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #f1f5f9;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Slim scrollbars keep the dense inspection panels readable. */
+* {
+  scrollbar-width: thin;
+}
+
+img,
+canvas {
+  image-rendering: -webkit-optimize-contrast;
+}

@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 /**
  * Secure bridge between the sandboxed renderer and the main process.
@@ -14,4 +14,7 @@ contextBridge.exposeInMainWorld('aerotwin', {
     chrome: process.versions.chrome,
     node: process.versions.node,
   },
+  pickVideoFile: () => ipcRenderer.invoke('aerotwin:pick-video-file'),
+  getBackendUrl: () => ipcRenderer.invoke('aerotwin:get-backend-url'),
 });
+

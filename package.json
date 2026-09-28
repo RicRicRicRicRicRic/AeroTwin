@@ -1,0 +1,17 @@
+{
+  "name": "aerotwin-desktop",
+  "version": "1.0.0",
+  "description": "AeroTwin AI — Structural Health Monitoring Framework & Desktop Application",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "postinstall": "cd frontend && npm install",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}

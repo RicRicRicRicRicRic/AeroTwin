@@ -18,7 +18,10 @@ BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
 
 DEFAULT_DATA_DIR: Path = PROJECT_ROOT / "data"
-DEFAULT_CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+#: Vite dev-server origins plus the ``null`` origin that Chromium sends for the
+#: packaged Electron page loaded from ``file://`` — without it the desktop build
+#: could not call the sidecar (or read image pixels for the canvas viewers).
+DEFAULT_CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,null"
 
 
 @dataclass(frozen=True)
@@ -120,6 +123,28 @@ class Settings:
             raise ValueError(f"frames_path escapes the frames directory: {frames_path!r}")
         if not candidate.is_dir():
             raise FileNotFoundError(f"Frames run not found: {candidate}")
+        return candidate
+
+    def resolve_managed_path(self, root: Path, relative: str = "") -> Path:
+        """Resolve *relative* inside a managed *root*, rejecting traversal.
+
+        Used by the artifact API that streams masks/maps/reports to the
+        frontend. Accepts ``""`` for the root itself and both slash styles.
+
+        Raises:
+            ValueError: The reference escapes *root* (or is absolute).
+            FileNotFoundError: The resolved path does not exist.
+        """
+        cleaned = (relative or "").strip().replace("\\", "/").strip("/")
+        for segment in cleaned.split("/"):
+            if segment in {"..", "."}:
+                raise ValueError(f"Path escapes the managed directory: {relative!r}")
+        base = root.resolve()
+        candidate = (base / cleaned).resolve() if cleaned else base
+        if candidate != base and not candidate.is_relative_to(base):
+            raise ValueError(f"Path escapes the managed directory: {relative!r}")
+        if not candidate.exists():
+            raise FileNotFoundError(f"Path not found: {candidate}")
         return candidate
 
 
