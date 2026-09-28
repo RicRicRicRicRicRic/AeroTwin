@@ -34,7 +34,9 @@ class Settings:
     inputs_dir: Path
     raw_images_dir: Path
     orthomosaics_dir: Path
+    raw_videos_dir: Path
     processed_dir: Path
+    frames_dir: Path
     outputs_dir: Path
     weights_dir: Path
     host: str
@@ -61,7 +63,9 @@ class Settings:
             inputs_dir=data_dir / "inputs",
             raw_images_dir=data_dir / "inputs" / "raw_images",
             orthomosaics_dir=data_dir / "inputs" / "orthomosaics",
+            raw_videos_dir=data_dir / "inputs" / "raw_videos",
             processed_dir=data_dir / "processed",
+            frames_dir=data_dir / "processed" / "frames",
             outputs_dir=data_dir / "outputs",
             weights_dir=BACKEND_DIR / "app" / "models" / "weights",
             host=os.environ.get("AEROTWIN_HOST", "127.0.0.1"),
@@ -75,7 +79,9 @@ class Settings:
         return (
             self.raw_images_dir,
             self.orthomosaics_dir,
+            self.raw_videos_dir,
             self.processed_dir / "preprocessed",
+            self.processed_dir / "frames",
             self.processed_dir / "material_masks",
             self.processed_dir / "structural_elements",
             self.processed_dir / "crack_maps",

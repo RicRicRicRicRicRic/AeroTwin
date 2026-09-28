@@ -26,6 +26,45 @@ from .config import settings
 BUSY_TIMEOUT_SECONDS: float = 5.0
 _BUSY_TIMEOUT_MS: int = 5000
 
+#: Idempotent DDL applied on every startup (``IF NOT EXISTS`` throughout).
+SCHEMA_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS videos (
+        id TEXT PRIMARY KEY,
+        filename TEXT NOT NULL UNIQUE,
+        stored_path TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        fps REAL NOT NULL,
+        frame_count INTEGER NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        duration_seconds REAL NOT NULL,
+        codec TEXT,
+        ingested_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS processing_jobs (
+        id TEXT PRIMARY KEY,
+        job_type TEXT NOT NULL,
+        video_id TEXT,
+        video_filename TEXT NOT NULL,
+        status TEXT NOT NULL,
+        params_json TEXT NOT NULL,
+        output_dir TEXT,
+        frames_written INTEGER,
+        total_video_frames INTEGER,
+        processing_time_seconds REAL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        FOREIGN KEY (video_id) REFERENCES videos (id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_processing_jobs_status ON processing_jobs (status)",
+    "CREATE INDEX IF NOT EXISTS idx_processing_jobs_video ON processing_jobs (video_filename)",
+)
+
 
 def _configure_connection(connection: sqlite3.Connection) -> None:
     """Apply the pragmas every AeroTwin connection must run with."""
@@ -64,11 +103,12 @@ def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 
 def init_database(db_path: Path | None = None) -> Path:
-    """Create the database file (and its parent directory) and enable WAL.
+    """Create the database file, enable WAL, and apply the schema DDL.
 
-    Idempotent: safe to call on every application start. Returns the absolute
-    path of the database and raises ``RuntimeError`` if WAL cannot be
-    activated, so misconfiguration fails loudly instead of silently.
+    Idempotent: safe to call on every application start (all statements use
+    ``IF NOT EXISTS``). Returns the absolute path of the database and raises
+    ``RuntimeError`` if WAL cannot be activated, so misconfiguration fails
+    loudly instead of silently.
     """
     path = db_path if db_path is not None else settings.database_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +119,8 @@ def init_database(db_path: Path | None = None) -> Path:
             raise RuntimeError(
                 f"Failed to enable WAL journal mode on {path} (got {journal_mode!r})"
             )
+        for statement in SCHEMA_STATEMENTS:
+            connection.execute(statement)
     return path
 
 
