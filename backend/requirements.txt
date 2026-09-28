@@ -7,6 +7,11 @@ pydantic==2.13.5
 opencv-python==5.0.0.93
 numpy==2.4.6
 
+# PyTorch model inference (Phase 3). The Windows PyPI wheel is CPU-only;
+# install the CUDA build from https://download.pytorch.org/whl/cu126 when
+# enough disk space is available — the code auto-detects the device.
+torch==2.14.0
+
 # Testing
 pytest==9.1.1
 httpx==0.28.1

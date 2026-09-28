@@ -23,7 +23,13 @@ from typing import Any
 import cv2
 
 from ..core.config import settings
-from ..core.database import get_connection
+from ..core.database import (
+    create_job_record,
+    get_connection,
+    get_job_record,
+    list_job_records,
+    update_job_record,
+)
 from ..schemas.processing import (
     ExtractionJobResponse,
     ExtractionManifest,
@@ -296,20 +302,6 @@ def ensure_video_record(video_path: Path, db_path: Path | None = None) -> VideoR
     return register_video(_build_video_record(video_path), db_path)
 
 
-#: Columns the job-status updater may write (identifiers are never user input).
-_JOB_UPDATABLE_COLUMNS: frozenset[str] = frozenset(
-    {
-        "status",
-        "output_dir",
-        "frames_written",
-        "total_video_frames",
-        "processing_time_seconds",
-        "error",
-        "completed_at",
-    }
-)
-
-
 def _row_to_job(row: Any) -> ExtractionJobResponse:
     """Convert a ``processing_jobs`` table row into an API response model."""
     return ExtractionJobResponse(
@@ -336,24 +328,13 @@ def create_extraction_job(
     db_path: Path | None = None,
 ) -> str:
     """Insert a ``pending`` frame-extraction job and return its id."""
-    job_id = uuid.uuid4().hex
-    with get_connection(db_path) as connection:
-        connection.execute(
-            """
-            INSERT INTO processing_jobs (
-                id, job_type, video_id, video_filename, status, params_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                job_id,
-                JOB_TYPE_FRAME_EXTRACTION,
-                video.video_id,
-                video.filename,
-                JobStatus.PENDING.value,
-                params.model_dump_json(),
-                _utc_now().isoformat(),
-            ),
-        )
+    job_id = create_job_record(
+        job_type=JOB_TYPE_FRAME_EXTRACTION,
+        video_id=video.video_id,
+        video_filename=video.filename,
+        params_json=params.model_dump_json(),
+        db_path=db_path,
+    )
     logger.info("Created frame extraction job %s for %s", job_id, video.filename)
     return job_id
 
@@ -363,30 +344,13 @@ def update_extraction_job(
     values: dict[str, Any],
     db_path: Path | None = None,
 ) -> None:
-    """Persist selected job columns (``values`` must use whitelisted names).
-
-    Raises:
-        KeyError: Unknown job id. ValueError: Non-whitelisted column.
-    """
-    if not values:
-        return
-    unknown = set(values) - _JOB_UPDATABLE_COLUMNS
-    if unknown:
-        raise ValueError(f"Cannot update job columns: {sorted(unknown)}")
-    assignments = ", ".join(f"{column} = ?" for column in values)
-    sql = f"UPDATE processing_jobs SET {assignments} WHERE id = ?"  # noqa: S608 (whitelisted identifiers)
-    with get_connection(db_path) as connection:
-        cursor = connection.execute(sql, (*values.values(), job_id))
-        if cursor.rowcount == 0:
-            raise KeyError(f"Unknown processing job: {job_id}")
+    """Persist selected job columns; the whitelist is enforced in ``core.database``."""
+    update_job_record(job_id, values, db_path)
 
 
 def get_extraction_job(job_id: str, db_path: Path | None = None) -> ExtractionJobResponse | None:
     """Fetch a job by id, or ``None`` when it does not exist."""
-    with get_connection(db_path) as connection:
-        row = connection.execute(
-            "SELECT * FROM processing_jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+    row = get_job_record(job_id, db_path)
     return _row_to_job(row) if row is not None else None
 
 
@@ -395,11 +359,7 @@ def list_extraction_jobs(
     limit: int = 50,
 ) -> list[ExtractionJobResponse]:
     """Return the most recent jobs, newest first."""
-    with get_connection(db_path) as connection:
-        rows = connection.execute(
-            "SELECT * FROM processing_jobs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+    rows = list_job_records(limit, db_path)
     return [_row_to_job(row) for row in rows]
 
 
@@ -589,3 +549,35 @@ def run_frame_extraction_job(
         result.total_video_frames,
         result.processing_time_seconds,
     )
+
+
+# ---------------------------------------------------------------------------
+# Frame-run helpers for the AI analysis phases (Phase 3+)
+# ---------------------------------------------------------------------------
+#: Image extensions accepted as extracted frames.
+FRAME_SUFFIXES: frozenset[str] = frozenset({".jpg", ".jpeg", ".png"})
+
+
+class FramesNotFoundError(VideoNotFoundError):
+    """Raised when an extraction run contains no usable frame images.
+
+    Inherits :class:`VideoNotFoundError` so the API layer maps it to HTTP 404.
+    """
+
+
+def list_run_frames(frames_run_dir: Path) -> list[Path]:
+    """Return the frame images of an extraction run, sorted by filename.
+
+    Raises:
+        FramesNotFoundError: The directory is missing or holds no frames.
+    """
+    if not frames_run_dir.is_dir():
+        raise FramesNotFoundError(f"Frames run directory not found: {frames_run_dir}")
+    frames = sorted(
+        path
+        for path in frames_run_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in FRAME_SUFFIXES
+    )
+    if not frames:
+        raise FramesNotFoundError(f"No frame images found in: {frames_run_dir}")
+    return frames

@@ -37,6 +37,9 @@ class Settings:
     raw_videos_dir: Path
     processed_dir: Path
     frames_dir: Path
+    material_masks_dir: Path
+    structural_elements_dir: Path
+    crack_maps_dir: Path
     outputs_dir: Path
     weights_dir: Path
     host: str
@@ -66,8 +69,13 @@ class Settings:
             raw_videos_dir=data_dir / "inputs" / "raw_videos",
             processed_dir=data_dir / "processed",
             frames_dir=data_dir / "processed" / "frames",
+            material_masks_dir=data_dir / "processed" / "material_masks",
+            structural_elements_dir=data_dir / "processed" / "structural_elements",
+            crack_maps_dir=data_dir / "processed" / "crack_maps",
             outputs_dir=data_dir / "outputs",
-            weights_dir=BACKEND_DIR / "app" / "models" / "weights",
+            weights_dir=Path(
+                os.environ.get("AEROTWIN_WEIGHTS_DIR", BACKEND_DIR / "app" / "models" / "weights")
+            ).resolve(),
             host=os.environ.get("AEROTWIN_HOST", "127.0.0.1"),
             port=int(os.environ.get("AEROTWIN_PORT", "8000")),
             cors_origins=cors_origins,
@@ -81,10 +89,10 @@ class Settings:
             self.orthomosaics_dir,
             self.raw_videos_dir,
             self.processed_dir / "preprocessed",
-            self.processed_dir / "frames",
-            self.processed_dir / "material_masks",
-            self.processed_dir / "structural_elements",
-            self.processed_dir / "crack_maps",
+            self.frames_dir,
+            self.material_masks_dir,
+            self.structural_elements_dir,
+            self.crack_maps_dir,
             self.outputs_dir / "assessments",
             self.outputs_dir / "reports",
             self.outputs_dir / "visualizations",
@@ -95,6 +103,24 @@ class Settings:
         """Idempotently create managed directories; existing contents are never touched."""
         for directory in self.managed_directories():
             directory.mkdir(parents=True, exist_ok=True)
+
+    def resolve_frames_run(self, frames_path: str) -> Path:
+        """Resolve a frames-run reference (``<stem>/<run_id>``) under data/processed/frames/.
+
+        Raises:
+            ValueError: The reference is empty or escapes the frames directory.
+            FileNotFoundError: The referenced run directory does not exist.
+        """
+        relative = frames_path.strip().replace("\\", "/")
+        if not relative:
+            raise ValueError("frames_path must not be empty")
+        root = self.frames_dir.resolve()
+        candidate = (root / relative).resolve()
+        if candidate == root or not candidate.is_relative_to(root):
+            raise ValueError(f"frames_path escapes the frames directory: {frames_path!r}")
+        if not candidate.is_dir():
+            raise FileNotFoundError(f"Frames run not found: {candidate}")
+        return candidate
 
 
 settings: Settings = Settings.from_env()

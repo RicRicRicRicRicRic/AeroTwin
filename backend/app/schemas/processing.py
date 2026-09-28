@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -150,4 +150,122 @@ class ExtractionManifest(BaseModel):
     started_at: datetime
     completed_at: datetime
     opencv_version: str
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: AI analysis jobs (segmentation, element detection, crack mapping)
+# ---------------------------------------------------------------------------
+class FramesJobRequest(BaseModel):
+    """Shared request for AI analysis jobs operating on an extracted-frames run."""
+
+    frames_path: str = Field(
+        min_length=1,
+        description=(
+            "Frames-run reference relative to data/processed/frames/, "
+            "e.g. 'smoke_test/run_20260928T075843Z_7f201442'."
+        ),
+    )
+
+
+class MaterialSegmentationRequest(FramesJobRequest):
+    """Payload for ``POST /api/processing/segment-materials``."""
+
+    tile_size: int | None = Field(
+        default=None,
+        ge=64,
+        le=2048,
+        description="Optional inference tile-size override (memory/quality trade-off).",
+    )
+
+
+class ElementDetectionRequest(FramesJobRequest):
+    """Payload for ``POST /api/processing/detect-elements``."""
+
+
+class CrackMappingRequest(FramesJobRequest):
+    """Payload for ``POST /api/processing/map-cracks``."""
+
+    crack_threshold: float = Field(
+        default=0.5,
+        gt=0.0,
+        lt=1.0,
+        description="Crack-probability threshold for binarising masks (0-1).",
+    )
+
+
+class ProcessingJobResponse(BaseModel):
+    """Generic status payload for any processing job type.
+
+    Used by the shared ``GET /api/processing/jobs`` endpoints; ``params`` and
+    ``metrics`` stay untyped JSON so extraction, segmentation, and
+    crack-mapping jobs serialise through one model.
+    """
+
+    job_id: str
+    job_type: str
+    status: JobStatus
+    video_filename: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    output_dir: str | None = None
+    frames_written: int | None = None
+    total_video_frames: int | None = None
+    processing_time_seconds: float | None = None
+    metrics: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class DetectedElement(BaseModel):
+    """A bounding box for one detected structural element."""
+
+    label: str = Field(description="One of ELEMENT_CLASSES (column/beam/wall).")
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class CrackFrameMetrics(BaseModel):
+    """Per-frame crack defect metrics (persisted to ``frame_defect_metrics``)."""
+
+    frame_filename: str
+    crack_pixel_count: int = Field(ge=0)
+    crack_area_ratio: float = Field(ge=0.0, description="Crack pixels / total pixels x 100.")
+    crack_length_px: float = Field(ge=0.0, description="Skeleton length in px (Zhang-Suen).")
+    mean_width_px: float = Field(ge=0.0, description="Crack pixels / skeleton length.")
+    component_count: int = Field(ge=0)
+
+
+class CrackRunSummary(BaseModel):
+    """Run-level aggregate of per-frame crack metrics (stored in ``metrics_json``)."""
+
+    frames_analyzed: int
+    frames_with_cracks: int
+    total_crack_pixels: int
+    mean_area_ratio: float
+    mean_crack_length_px: float
+    mean_width_px: float
+    longest_crack_px: float
+
+
+class AnalysisRunManifest(BaseModel):
+    """Sidecar manifest written next to AI analysis outputs (reproducibility)."""
+
+    job_id: str
+    job_type: str
+    frames_run: str
+    frames_run_path: str
+    frames_processed: int
+    params: dict[str, Any]
+    class_names: list[str] | None = None
+    weights_file: str
+    device: str
+    tile_size: int | None = None
+    torch_version: str
+    opencv_version: str
+    processing_time_seconds: float
+    started_at: datetime
+    completed_at: datetime
 
