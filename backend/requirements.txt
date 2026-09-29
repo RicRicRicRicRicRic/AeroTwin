@@ -19,3 +19,8 @@ pillow==12.3.0
 # Testing
 pytest==9.1.1
 httpx==0.28.1
+
+# Production packaging (Phase 7): backend/aerotwin_backend.spec (PyInstaller 6.x)
+# Build from the repo root:  npm run build:backend
+# NOTE: >= 6.22.3 is required for the numpy 2.4 / torch 2.14 runtime layout.
+pyinstaller==6.22.3

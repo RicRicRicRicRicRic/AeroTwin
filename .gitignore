@@ -14,7 +14,12 @@ data/**
 # Node / Electron
 node_modules/
 dist/
+build/
 release/
+
+# Packaged installers (the directory layout stays tracked via .gitkeep)
+assets/installers/*
+!assets/installers/.gitkeep
 
 # Editors / OS
 .vscode/

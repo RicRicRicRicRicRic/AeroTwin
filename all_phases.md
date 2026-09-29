@@ -207,6 +207,18 @@ All Phase 5 components have been completed, integrated, and verified against the
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 ### Phase 6 Implementation & Verification Summary — Cross-Frame Result Aggregation
 
 Frame-level detection over-counts: a single diagonal crack that stays in view for 20 frames is reported as 20 separate defects. Phase 6 adds the missing pipeline stage that converts *frame-local* observations into *global* defect entities, with full per-frame provenance for the thesis audit trail.
@@ -247,3 +259,101 @@ Frame-level detection over-counts: a single diagonal crack that stays in view fo
 ### Verification & Validation
 
 - **Backend Test Suite**: `python -m pytest` from `backend/` across all suites, now including `tests/test_cross_frame_aggregation.py` (26 tests: IoU/frame-index geometry, dedup merge/separate/frame-gap/one-per-frame/determinism/label separation, mask + JSON extraction fallbacks, entity building, DB persistence, background job failure handling, and all four API status codes) — **102 passed**.
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Phase 7 Implementation & Verification Summary — Production Packaging, Electron Compilation & System Validation
+
+Phase 7 turns the development tree into a distributable desktop product: the FastAPI backend is frozen into a standalone executable, electron-builder wires the Vite bundle + Electron main process + that executable into cross-platform installers, and an automated end-to-end evaluation script produces the performance telemetry for the thesis results chapter.
+
+---
+
+### What Was Accomplished
+
+1. **Frozen path resolution (`backend/app/core/config.py`)**:
+   - `IS_FROZEN` (`sys.frozen`) and `BUNDLE_DIR` (`sys._MEIPASS`) are resolved at import, so a packaged build never depends on `__file__` being meaningful.
+   - `_default_backend_dir()` returns the bundle root when frozen, which makes the model weights resolve to `<bundle>/app/models/weights` — the same relative layout as the repository.
+   - `_default_data_dir()` returns a **writable per-user** location when frozen (`%APPDATA%/AeroTwinAI/data`, `~/Library/Application Support/AeroTwinAI/data`, `$XDG_DATA_HOME/aerotwin-ai/data`) because an installed app lives in a read-only directory. `AEROTWIN_*` environment variables still win everywhere.
+
+2. **Frozen entry point (`backend/run_frozen.py`)**:
+   - Imports the ASGI `app` object directly and serves it with uvicorn — uvicorn's `reload` mode re-spawns the interpreter and watches nonexistent files in a bundle, so the dev launcher (`run_backend.py`) stays reload-based while the frozen launcher is reload-free.
+   - Guards `sys.stdout`/`sys.stderr` (a windowed Windows binary may start without streams) and logs the resolved data + weights directories on startup.
+
+3. **PyInstaller spec (`backend/aerotwin_backend.spec`)**:
+   - onedir bundle from `run_frozen.py` (fast start, no multi-GB temp extraction), `console=False` so no stray console window appears next to the Electron GUI, UPX disabled (it corrupts torch/opencv DLLs).
+   - `datas` bundles `app/models/weights/` at the layout path config.py expects.
+   - uvicorn's string-imported loops/protocols/lifespan and `anyio._backends._asyncio` are declared as hidden imports; `torch`/`cv2` rely on the PyInstaller + hooks-contrib hooks (`collect_all('torch')` would add ~12k non-runtime files).
+   - Two deliberate binary exclusions, both required for a working product build:
+     * **Stale MSVC/UCRT runtimes** copied out of the Python install (v14.29) shadow the newer system CRT inside the bundle; torch ≥ 2.9 then fails to initialise `c10.dll` with `WinError 1114`. Dropping the stale copies makes the sidecar use the OS runtime that dev-mode torch already loads (see pytorch/pytorch#169429).
+     * **`torch/bin/protoc.exe`** — a build tool inference never calls; it also made electron-builder's code-signing pass choke on a non-runtime binary under `resources/backend`.
+
+4. **Electron packaging (root `package.json`, `electron/main.js`)**:
+   - `build` block: `appId`, `productName`, `directories.output = assets/installers`, `files` (Electron sources + `frontend/dist` + `package.json`), `extraResources` mapping the compiled sidecar folder to `resources/backend`, plus `win`/`nsis`, `mac` (dmg, x64+arm64) and `linux` (AppImage) targets.
+   - Scripts: `build:frontend`, `build:backend` (PyInstaller), `build:all`, `pack` (`--dir`), `dist`, `dist:win`, `dist:mac`, `dist:linux`.
+   - `electron/main.js` now resolves the **bundled** sidecar from `process.resourcesPath/backend/aerotwin_backend[.exe]` in packaged builds (falling back to `python run_backend.py` in development), forwards the backend port via `AEROTWIN_HOST`/`AEROTWIN_PORT`, and the liveness probe was corrected to `/api/health`.
+   - `assets/icons/generate_icons.py` renders the AeroTwin mark deterministically into `icon.png` (512 px) and a multi-size `icon.ico`; electron-builder fails hard without real icon files, and the Windows target points at the `.ico` explicitly (app-builder's converter panics on the multi-size ICO otherwise).
+
+5. **System evaluation script (`backend/tests/evaluate_system.py`)**:
+   - Drives the complete pipeline synchronously — video synthesis + import → frame extraction → AI analysis (material segmentation, element detection, crack mapping) → cross-frame aggregation → seismic assessment → report generation (JSON + PDF) — with per-stage wall times and the backend's `processing_time_seconds`.
+   - Isolated by construction: a temporary `AEROTWIN_DATA_DIR` is used (the repository `data/` is never touched) and the run is fully seeded (seed 42).
+   - When real `.pt` weights are absent it generates deterministic fixtures **and re-calibrates their 1×1 heads on the actual decoded frames** (the mp4/JPEG round-trip shifts the razor-thin random-head margins, so a bias grid is scored with the real detectors until detections are sparse but non-zero). The chosen operating point is recorded in the telemetry and the `weights.source` field states whether real, external or synthetic weights were used.
+   - Telemetry written to `docs/sample_outputs/system_evaluation.json` (full stage metrics, environment/package versions, weight hashes, DB row counts, notes) and `docs/sample_outputs/system_evaluation.md` (results tables for the thesis chapter), and the script exits non-zero if any stage fails.
+
+### Regression Found & Fixed by the Evaluator
+
+The evaluation exposed a Phase 6 defect that the unit suite could not reach (its fixtures produced no element detections): `build_element_entities()` populated `defect_id` on `GlobalElementEntity`, which requires `element_id`, and the persistence loop read the same wrong attribute. Both were corrected and pinned by a new regression test, `test_build_element_entities_uses_element_id_field`, in `tests/test_cross_frame_aggregation.py`.
+
+---
+
+### Verification & Validation
+
+- **Backend test suite**: `python -m pytest` from `backend/` — **103 passed** (102 + the new element-entity regression test).
+- **Frontend build**: `npm run build` in `frontend/` — Vite production bundle builds clean (`dist/index.html` + hashed CSS/JS).
+- **PyInstaller build**: `python -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/aerotwin_backend.spec` — onedir bundle (~580 MB, dominated by `torch_cpu.dll`) with `_internal/app/models/weights` present and the stale CRT + `protoc.exe` exclusions applied.
+- **Frozen sidecar smoke test** (executable run standalone with `AEROTWIN_DATA_DIR`/`AEROTWIN_PORT` set): healthy in ~2 s, `/api/health` returns `{"status":"healthy", ..., "journal_mode":"wal"}`, the log confirms `weights=...\_internal\app\models\weights` (i.e. `sys._MEIPASS` resolution works) and the database is created in the requested data dir.
+- **Frozen pipeline over HTTP**: a synthetic clip was ingested (**201**), frames extracted (**202 → completed**, 8 frames), `segment-materials` returned a clean **503** because no material weights are shipped (the documented fallback), and `map-cracks` completed with **real frozen torch inference** (8/8 frames with cracks, 504 crack pixels, 63 px mean crack length).
+- **electron-builder pack** (`npx electron-builder --dir`): success — `assets/installers/win-unpacked/` contains `AeroTwin AI.exe`, `resources/app.asar`, and `resources/backend/aerotwin_backend.exe` with its `_internal` tree (protoc + stale CRT absent).
+- **Packaged desktop app launch**: the window process spawned the bundled sidecar, the sidecar reported `data=%APPDATA%\AeroTwinAI\data` (per-user default) and `weights=<install>\resources\backend\_internal\app\models\weights`, `/api/health` answered **200** within 2 s, the per-user data tree (`inputs/`, `processed/`, `outputs/`, `aerotwin.db`) was created, and both processes shut down cleanly.
+- **Evaluation telemetry** (seed 42, CPU, synthetic calibrated weights): video import 0.12 s → frame extraction 0.12 s → weights calibration 1.67 s → material segmentation 0.12 s (≈4 ms/frame) → element detection 0.12 s (16 elements) → crack mapping 0.17 s (8/8 frames) → cross-frame aggregation 0.13 s (**8 raw → 1 unique crack, dedup ratio 0.875**; 16 → 2 elements) → seismic assessment 0.10 s (score **55.13/100 "Substantial"**, element-damage factor active) → report generation 0.29 s (23.9 kB JSON + PDF). Total ≈ 3.0 s.
+
+---
+
+### Command Reference
+
+```powershell
+# Backend test suite (103 tests)
+cd backend; python -m pytest
+
+# Compile the FastAPI sidecar (writes backend/dist/aerotwin_backend/)
+npm run build:backend
+
+# Vite production bundle
+npm run build:frontend
+
+# Everything + unpacked desktop app (assets/installers/win-unpacked/)
+npm run pack
+
+# Platform installer: NSIS (.exe) / dmg / AppImage
+npm run dist:win      # -> assets/installers/AeroTwin AI-Setup-1.0.0.exe
+npm run dist:mac
+npm run dist:linux
+
+# Automated end-to-end evaluation -> docs/sample_outputs/system_evaluation.{json,md}
+cd backend; python tests/evaluate_system.py [--seed 42] [--keep]
+```
+
+> Note: `npm run dist:win` builds the NSIS installer from the same configuration validated with `npm run pack`; only the unpacked pack was produced during this phase to avoid emitting an ~850 MB installer archive. Drop real `.pt` weights into `backend/app/models/weights/` **before** `npm run build:backend` so they ship inside `resources/backend/_internal/app/models/weights`; the API keeps returning a descriptive 503 until they are present.

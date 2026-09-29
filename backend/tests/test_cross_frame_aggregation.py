@@ -33,6 +33,7 @@ from app.services.cross_frame_aggregator import (
     FrameObservations,
     bbox_iou,
     build_crack_entities,
+    build_element_entities,
     deduplicate_observations,
     extract_crack_frames,
     extract_element_frames,
@@ -344,6 +345,29 @@ def test_build_crack_entities_without_observations_keeps_representative() -> Non
 
     assert len(built[0].observations) == 1
     assert built[0].observations[0].length_px == pytest.approx(90.0)
+
+
+def test_build_element_entities_uses_element_id_field() -> None:
+    # Regression: element entities must populate ``element_id`` (not the
+    # crack-only ``defect_id``); found by the Phase 7 system evaluation once
+    # fixtures finally produced non-empty element detections.
+    frames = [
+        frame(0, observation(0, label="column", confidence=0.80)),
+        frame(1, observation(1, x=2, label="column", confidence=0.90)),
+    ]
+    entities = deduplicate_observations(frames, iou_threshold=0.3, max_frame_gap=10)
+
+    built = build_element_entities(entities, include_observations=True)
+
+    assert len(built) == 1
+    element = built[0]
+    assert element.element_id == "ELM-COLUMN-0001"
+    assert element.kind == "element"
+    assert element.observation_count == 2
+    assert element.label == "column"
+    assert element.confidence_max == pytest.approx(0.90)
+    assert element.confidence_mean == pytest.approx(0.85)
+    assert len(element.observations) == 2
 
 
 def test_entities_are_ordered_by_first_seen_frame() -> None:

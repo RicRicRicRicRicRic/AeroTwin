@@ -673,7 +673,7 @@ def build_element_entities(
         strongest = _strongest_observation(entity)
         built.append(
             GlobalElementEntity(
-                defect_id=f"{prefix}-{counts[entity.label]:04d}",
+                element_id=f"{prefix}-{counts[entity.label]:04d}",
                 label=entity.label,
                 observation_count=len(entity.observations),
                 first_frame_filename=first.frame_filename,
@@ -815,7 +815,7 @@ def persist_registry(
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    f"{job_id}:{source.defect_id}",
+                    f"{job_id}:{source.element_id}",
                     job_id,
                     registry.crack_job_id,
                     registry.element_job_id or "",

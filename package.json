@@ -1,17 +1,90 @@
 {
   "name": "aerotwin-desktop",
   "version": "1.0.0",
-  "description": "AeroTwin AI — Structural Health Monitoring Framework & Desktop Application",
+  "description": "AeroTwin AI - Structural Health Monitoring Framework & Desktop Application",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "postinstall": "cd frontend && npm install",
     "dev:frontend": "cd frontend && npm run dev",
     "build:frontend": "cd frontend && npm run build",
+    "build:backend": "pyinstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/aerotwin_backend.spec",
+    "build:all": "npm run build:frontend && npm run build:backend",
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "pack": "npm run build:all && electron-builder --dir",
+    "dist": "npm run build:all && electron-builder",
+    "dist:win": "npm run build:all && electron-builder --win",
+    "dist:mac": "npm run build:all && electron-builder --mac",
+    "dist:linux": "npm run build:all && electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^34.0.0"
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ai.aerotwin.desktop",
+    "productName": "AeroTwin AI",
+    "copyright": "Copyright 2026 AeroTwin AI Project",
+    "directories": {
+      "output": "assets/installers",
+      "buildResources": "assets"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/aerotwin_backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/icons/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AeroTwin AI",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app.category.science",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Science",
+      "maintainer": "AeroTwin AI Project"
+    }
   }
 }
+

@@ -1,0 +1,379 @@
+{
+  "schema": "aerotwin.system_evaluation.v1",
+  "outcome": "completed",
+  "error": null,
+  "generated_at": "2026-09-29T12:17:19.728811+00:00",
+  "started_at": "2026-09-29T12:17:13.782295+00:00",
+  "run_stamp": "20260929T121713Z",
+  "seed": 42,
+  "environment": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.9",
+    "machine": "AMD64",
+    "device": "cpu",
+    "packages": {
+      "torch": "2.14.0",
+      "opencv-python": "5.0.0.93",
+      "opencv-python-headless": null,
+      "numpy": "2.4.6",
+      "fastapi": "0.141.1",
+      "uvicorn": "0.54.0",
+      "pydantic": "2.13.5",
+      "starlette": "1.7.0",
+      "reportlab": "5.0.1",
+      "pytest": "9.1.1",
+      "pyinstaller": "6.22.3"
+    }
+  },
+  "weights": {
+    "source": "synthetic_random_init",
+    "directory": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_weights_i0vex_xf",
+    "files": {
+      "material_model.pt": {
+        "size_bytes": 463701,
+        "sha256": "72bafcc3fc8c26b70d84f659b22d9c2a355f80658d7ce9225e6da0e7a9753398"
+      },
+      "element_model.pt": {
+        "size_bytes": 463501,
+        "sha256": "d1954a39a1b00175e7628715fe62184642cd6f7d913f9b9b5c73ef943d99801e"
+      },
+      "crack_model.pt": {
+        "size_bytes": 463229,
+        "sha256": "1a4fbcd7d1767f31ece44d5998b28b77ad60f2a6f8683854d43fa749c9901e99"
+      }
+    }
+  },
+  "pipeline": {
+    "stages": [
+      {
+        "stage": "video_import",
+        "description": "Synthesize UAV clip and ingest into data/inputs/raw_videos/",
+        "status": "completed",
+        "wall_time_seconds": 0.0501,
+        "metrics": {
+          "source_clip": {
+            "path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_src_20260929T121713Z\\synthetic_facade.mp4",
+            "size_bytes": 8925,
+            "frames": 24,
+            "fps": 10,
+            "width": 64,
+            "height": 48
+          },
+          "ingested_video": {
+            "video_id": "04bc6b72fa4d41e4837fd7f54a16955b",
+            "filename": "synthetic_facade.mp4",
+            "stored_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\inputs\\raw_videos\\synthetic_facade.mp4",
+            "size_bytes": 8925,
+            "fps": 10.0,
+            "frame_count": 24,
+            "width": 64,
+            "height": 48,
+            "duration_seconds": 2.4,
+            "codec": "FMP4",
+            "ingested_at": "2026-09-29T12:17:17.351175Z"
+          }
+        }
+      },
+      {
+        "stage": "frame_extraction",
+        "description": "Extract frames from the ingested UAV video",
+        "status": "completed",
+        "wall_time_seconds": 0.092,
+        "job_id": "26019664dcdf49609c05542cd352f5f0",
+        "job_status": "completed",
+        "processing_time_seconds": 0.022095599997555837,
+        "frames_written": 8,
+        "output_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\frames\\synthetic_facade\\run_20260929T121717Z_26019664",
+        "metrics": {}
+      },
+      {
+        "stage": "weights_calibration",
+        "description": "Score a deterministic head-bias grid on decoded frames (real detectors)",
+        "status": "completed",
+        "wall_time_seconds": 1.167,
+        "metrics": {
+          "status": "calibrated",
+          "frames_used": 3,
+          "crack": {
+            "head_scale": 4.0,
+            "background_bias": -0.075,
+            "crack_pixel_fraction": 0.02018,
+            "components": 3
+          },
+          "element": {
+            "head_scale": 4.0,
+            "background_bias": 0.175,
+            "elements": 6,
+            "elements_per_frame": 2.0
+          }
+        }
+      },
+      {
+        "stage": "material_segmentation",
+        "description": "Tiled MiniUNet inference: masks per frame",
+        "status": "completed",
+        "wall_time_seconds": 0.1122,
+        "job_id": "455a5a5d32164d5fa074eba0e558b2f2",
+        "job_status": "completed",
+        "processing_time_seconds": 0.06301189999794587,
+        "frames_written": 8,
+        "output_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\material_masks\\synthetic_facade\\job_455a5a5d",
+        "metrics": {
+          "frames_processed": 8,
+          "mean_frame_inference_seconds": 0.00367529999857652,
+          "total_inference_seconds": 0.02940239998861216,
+          "device": "cpu",
+          "class_names": [
+            "background",
+            "concrete",
+            "metal",
+            "glass",
+            "brick",
+            "roofing"
+          ]
+        }
+      },
+      {
+        "stage": "element_detection",
+        "description": "Detect structural elements (column/beam/wall)",
+        "status": "completed",
+        "wall_time_seconds": 0.1223,
+        "job_id": "470a5f7cb6954de280b14183d502cf06",
+        "job_status": "completed",
+        "processing_time_seconds": 0.06669549999060109,
+        "frames_written": 8,
+        "output_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\structural_elements\\synthetic_facade\\job_470a5f7c",
+        "metrics": {
+          "frames_processed": 8,
+          "total_elements": 16,
+          "elements_by_label": {
+            "column": 0,
+            "beam": 8,
+            "wall": 8
+          },
+          "mean_frame_inference_seconds": 0.004004237500339514,
+          "device": "cpu"
+        }
+      },
+      {
+        "stage": "crack_mapping",
+        "description": "Detect + skeletonize cracks; log frame defect metrics",
+        "status": "completed",
+        "wall_time_seconds": 0.1593,
+        "job_id": "69e973abdb3f48cfb22cc55b6349beec",
+        "job_status": "completed",
+        "processing_time_seconds": 0.10820290000992827,
+        "frames_written": 8,
+        "output_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\crack_maps\\synthetic_facade\\job_69e973ab",
+        "metrics": {
+          "frames_analyzed": 8,
+          "frames_with_cracks": 8,
+          "total_crack_pixels": 496,
+          "mean_area_ratio": 2.018229,
+          "mean_crack_length_px": 62.0,
+          "mean_width_px": 1.0,
+          "longest_crack_px": 62.0
+        }
+      },
+      {
+        "stage": "cross_frame_aggregation",
+        "description": "Deduplicate frame-local detections into the global defect registry",
+        "status": "completed",
+        "wall_time_seconds": 0.1175,
+        "job_id": "5abfb8d2f7f142d2afa5686d72744a14",
+        "job_status": "completed",
+        "processing_time_seconds": 0.03207069999189116,
+        "frames_written": 8,
+        "output_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\aggregated\\synthetic_facade\\job_5abfb8d2",
+        "metrics": {
+          "frames_analyzed": 8,
+          "frames_with_cracks": 8,
+          "raw_crack_observations": 8,
+          "unique_crack_defects": 1,
+          "raw_element_observations": 16,
+          "unique_element_instances": 2,
+          "mean_observations_per_crack": 8.0,
+          "crack_dedup_ratio": 0.875,
+          "crack_dedup_reduction": 7,
+          "elements_by_label": {
+            "wall": 1,
+            "beam": 1
+          },
+          "iou_threshold": 0.3,
+          "max_frame_gap": 10,
+          "method": "greedy-bbox-iou"
+        }
+      },
+      {
+        "stage": "seismic_assessment",
+        "description": "Deterministic weighted seismic vulnerability score",
+        "status": "completed",
+        "wall_time_seconds": 0.1073,
+        "metrics": {
+          "vulnerability_score": 55.13,
+          "classification": "Substantial"
+        }
+      },
+      {
+        "stage": "report_generation",
+        "description": "Compile JSON + PDF inspection report",
+        "status": "completed",
+        "wall_time_seconds": 0.2875,
+        "metrics": {
+          "report_format": "both",
+          "json_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\outputs\\reports\\report_f2da23c6.json",
+          "pdf_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\outputs\\reports\\report_f2da23c6.pdf",
+          "size_bytes": 23979
+        }
+      }
+    ],
+    "stage_wall_time_total_seconds": 2.2152,
+    "outcomes": {
+      "video": {
+        "video_id": "04bc6b72fa4d41e4837fd7f54a16955b",
+        "filename": "synthetic_facade.mp4",
+        "stored_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\inputs\\raw_videos\\synthetic_facade.mp4",
+        "size_bytes": 8925,
+        "fps": 10.0,
+        "frame_count": 24,
+        "width": 64,
+        "height": 48,
+        "duration_seconds": 2.4,
+        "codec": "FMP4",
+        "ingested_at": "2026-09-29T12:17:17.351175Z"
+      },
+      "frames_run_dir": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\processed\\frames\\synthetic_facade\\run_20260929T121717Z_26019664",
+      "assessment_id": "c848449a2e4e40ef84c37a6b942f0859",
+      "report": {
+        "report_id": "f2da23c6c5c64497b86a31f392f5a7cc",
+        "assessment_id": "c848449a2e4e40ef84c37a6b942f0859",
+        "status": "completed",
+        "report_format": "both",
+        "json_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\outputs\\reports\\report_f2da23c6.json",
+        "pdf_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\outputs\\reports\\report_f2da23c6.pdf",
+        "assessment_json_path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\outputs\\assessments\\assessment_c848449a_rf2da23c6.json",
+        "size_bytes": 23979,
+        "error": null,
+        "created_at": "2026-09-29T12:17:19.419960Z",
+        "completed_at": "2026-09-29T12:17:19.703439Z"
+      },
+      "report_id": "f2da23c6c5c64497b86a31f392f5a7cc"
+    }
+  },
+  "aggregation": {
+    "raw_crack_observations": 8,
+    "unique_crack_defects": 1,
+    "crack_dedup_ratio": 0.875,
+    "crack_dedup_reduction": 7,
+    "mean_observations_per_crack": 8.0,
+    "raw_element_observations": 16,
+    "unique_element_instances": 2,
+    "frames_analyzed": 8,
+    "iou_threshold": 0.3,
+    "max_frame_gap": 10
+  },
+  "assessment": {
+    "assessment_id": "c848449a2e4e40ef84c37a6b942f0859",
+    "status": "completed",
+    "profile_id": "a5bdf1611d954522a875906fdeabff1c",
+    "building_name": "Synthetic Evaluation Tower 20260929T121713Z",
+    "params": {
+      "profile_id": "a5bdf1611d954522a875906fdeabff1c",
+      "crack_job_id": "69e973abdb3f48cfb22cc55b6349beec",
+      "element_job_id": "470a5f7cb6954de280b14183d502cf06"
+    },
+    "vulnerability_score": 55.13,
+    "classification": "Substantial",
+    "result": {
+      "vulnerability_score": 55.13,
+      "classification": "Substantial",
+      "factors": [
+        {
+          "name": "age",
+          "value": 0.5,
+          "weight": 0.12,
+          "contribution": 0.06
+        },
+        {
+          "name": "construction",
+          "value": 0.15,
+          "weight": 0.14,
+          "contribution": 0.021
+        },
+        {
+          "name": "stories",
+          "value": 0.555556,
+          "weight": 0.06,
+          "contribution": 0.033333
+        },
+        {
+          "name": "compliance",
+          "value": 0.4,
+          "weight": 0.08,
+          "contribution": 0.032
+        },
+        {
+          "name": "crack_intensity",
+          "value": 0.6,
+          "weight": 0.3,
+          "contribution": 0.18
+        },
+        {
+          "name": "extent",
+          "value": 1.0,
+          "weight": 0.15,
+          "contribution": 0.15
+        },
+        {
+          "name": "element_damage",
+          "value": 0.5,
+          "weight": 0.15,
+          "contribution": 0.075
+        }
+      ],
+      "defect_summary": {
+        "frames_analyzed": 8,
+        "frames_with_cracks": 8,
+        "mean_area_ratio": 2.018229,
+        "mean_width_px": 1.0,
+        "mean_length_px": 62.0,
+        "longest_crack_px": 62.0,
+        "total_crack_pixels": 496,
+        "element_damage_states": {
+          "intact": 8,
+          "minor": 0,
+          "moderate": 0,
+          "severe": 8
+        }
+      },
+      "recommendations": [
+        "Commission a structural engineering evaluation within 6 months and install crack monitors.",
+        "Verify seismic-code compliance status and document any retrofit history.",
+        "Cracks affect at least half of the inspected frames: measure crack widths in-situ (GSD-calibrated).",
+        "Detected elements show severe cracking: verify load paths without delay."
+      ]
+    },
+    "error": null,
+    "created_at": "2026-09-29T12:17:19.287921Z",
+    "completed_at": "2026-09-29T12:17:19.387138Z"
+  },
+  "database": {
+    "path": "C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z\\aerotwin.db",
+    "rows": {
+      "videos": 1,
+      "processing_jobs": 5,
+      "frame_defect_metrics": 8,
+      "building_profiles": 1,
+      "assessments": 1,
+      "reports": 1,
+      "global_crack_defects": 1,
+      "global_element_instances": 2
+    }
+  },
+  "notes": [
+    "Seeded run: random/NumPy/PyTorch RNGs fixed (seed=42) for reproducibility (domain rule 3).",
+    "Pipeline ran in an isolated data dir: C:\\Users\\ricmi\\AppData\\Local\\Temp\\aerotwin_eval_20260929T121713Z.",
+    "Model weights were NOT present in backend/app/models/weights/; deterministic random-init fixtures were used. Inference runtimes, dedup ratios, and scoring mechanics are valid, but task-level accuracy (IoU/F1/score calibration) would NOT be."
+  ],
+  "overall_wall_time_seconds": 2.5739
+}

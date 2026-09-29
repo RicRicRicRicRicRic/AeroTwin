@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
 
@@ -18,7 +19,7 @@ function checkBackendHealth(timeoutMs = 1500) {
         {
           hostname: parsed.hostname,
           port: parsed.port || 8000,
-          path: '/health',
+          path: '/api/health',
           method: 'GET',
           timeout: timeoutMs,
         },
@@ -47,15 +48,63 @@ async function waitForBackend(maxAttempts = 30, intervalMs = 500) {
   return false;
 }
 
-function startBackendSidecar() {
-  const backendDir = path.join(__dirname, '..', 'backend');
-  const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+/**
+ * Port of the sidecar the renderer polls, kept in sync with AEROTWIN_BACKEND_URL.
+ */
+function backendPort() {
+  try {
+    return new URL(BACKEND_URL).port || '8000';
+  } catch {
+    return '8000';
+  }
+}
 
-  console.log(`[AeroTwin] Launching FastAPI backend sidecar in ${backendDir}...`);
-  backendProcess = spawn(pythonCmd, ['run_backend.py'], {
-    cwd: backendDir,
+/**
+ * Resolve the compiled PyInstaller sidecar bundled by electron-builder
+ * (build.extraResources → <install>/resources/backend/aerotwin_backend[.exe]).
+ * Returns null in development, where the sidecar is launched from source.
+ */
+function resolvePackagedSidecar() {
+  if (!app.isPackaged) return null;
+  const executable = process.platform === 'win32' ? 'aerotwin_backend.exe' : 'aerotwin_backend';
+  const sidecarDir = path.join(process.resourcesPath, 'backend');
+  const candidate = path.join(sidecarDir, executable);
+  if (fs.existsSync(candidate)) {
+    return { command: candidate, cwd: sidecarDir };
+  }
+  console.warn(`[AeroTwin] Bundled sidecar not found at ${candidate}; falling back to source run.`);
+  return null;
+}
+
+function startBackendSidecar() {
+  const packaged = resolvePackagedSidecar();
+  const env = {
+    ...process.env,
+    AEROTWIN_HOST: '127.0.0.1',
+    AEROTWIN_PORT: backendPort(),
+  };
+
+  let command;
+  let args;
+  let cwd;
+  if (packaged) {
+    // Production: standalone executable (run_frozen.py entry, no reload).
+    command = packaged.command;
+    args = [];
+    cwd = packaged.cwd;
+  } else {
+    // Development: Python sources with uvicorn auto-reload.
+    command = process.platform === 'win32' ? 'python' : 'python3';
+    args = ['run_backend.py'];
+    cwd = path.join(__dirname, '..', 'backend');
+  }
+
+  console.log(`[AeroTwin] Launching FastAPI backend sidecar: ${command} ${args.join(' ')}`);
+  backendProcess = spawn(command, args, {
+    cwd,
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
+    shell: !packaged,
   });
 
   backendProcess.stdout?.on('data', (chunk) => {

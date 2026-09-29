@@ -9,15 +9,76 @@ override the defaults to keep the app testable and portable.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# config.py lives at backend/app/core/config.py:
-#   parents[0] = core/, [1] = app/, [2] = backend/, [3] = repository root
-BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
-PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
+# ---------------------------------------------------------------------------
+# Frozen (PyInstaller) vs. development path resolution
+# ---------------------------------------------------------------------------
+#: True inside a PyInstaller bundle (``sys.frozen`` is set by the bootloader).
+IS_FROZEN: bool = bool(getattr(sys, "frozen", False))
+#: Root of the PyInstaller bundle — ``sys._MEIPASS`` points at the ``_internal``
+#: directory of an onedir build (or the temp extraction dir of a onefile build).
+#: ``None`` during development.
+BUNDLE_DIR: Path | None = Path(sys._MEIPASS).resolve() if IS_FROZEN else None
 
-DEFAULT_DATA_DIR: Path = PROJECT_ROOT / "data"
+
+def _default_backend_dir() -> Path:
+    """Repository ``backend/`` in dev; the bundle root when frozen.
+
+    PyInstaller keeps the ``app`` package layout, so model weights bundled by
+    ``aerotwin_backend.spec`` live at ``<bundle>/app/models/weights`` — the same
+    relative location as in the repository. Resolving through ``sys._MEIPASS``
+    instead of ``__file__`` keeps production builds free of path errors even
+    when ``__file__`` is misleading (onefile temp extraction, zip imports).
+    """
+    if IS_FROZEN and BUNDLE_DIR is not None:
+        return BUNDLE_DIR
+    # config.py lives at backend/app/core/config.py:
+    #   parents[0] = core/, [1] = app/, [2] = backend/, [3] = repository root
+    return Path(__file__).resolve().parents[2]
+
+
+def _default_project_root() -> Path:
+    """Repository root in dev; the bundle's parent when frozen (unused for data)."""
+    if IS_FROZEN and BUNDLE_DIR is not None:
+        return BUNDLE_DIR.parent
+    return Path(__file__).resolve().parents[3]
+
+
+def _user_data_dir() -> Path:
+    """Writable per-user data directory for frozen builds.
+
+    An installed app lives under ``Program Files`` / ``/Applications`` which are
+    read-only, so raw videos, frames, and ``aerotwin.db`` go to the per-user
+    roaming/app-data location instead (``AEROTWIN_DATA_DIR`` still overrides).
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return base / "AeroTwinAI" / "data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "AeroTwinAI" / "data"
+    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "aerotwin-ai" / "data"
+
+
+def _default_data_dir() -> Path:
+    """``data/`` next to the repository in dev; per-user directory when frozen."""
+    if IS_FROZEN:
+        return _user_data_dir()
+    return _default_project_root() / "data"
+
+
+def _default_weights_dir() -> Path:
+    """Bundled weights inside ``sys._MEIPASS`` when frozen; repo copy in dev."""
+    return _default_backend_dir() / "app" / "models" / "weights"
+
+
+BACKEND_DIR: Path = _default_backend_dir()
+PROJECT_ROOT: Path = _default_project_root()
+
+DEFAULT_DATA_DIR: Path = _default_data_dir()
 #: Vite dev-server origins plus the ``null`` origin that Chromium sends for the
 #: packaged Electron page loaded from ``file://`` — without it the desktop build
 #: could not call the sidecar (or read image pixels for the canvas viewers).
@@ -79,7 +140,7 @@ class Settings:
             aggregated_dir=data_dir / "processed" / "aggregated",
             outputs_dir=data_dir / "outputs",
             weights_dir=Path(
-                os.environ.get("AEROTWIN_WEIGHTS_DIR", BACKEND_DIR / "app" / "models" / "weights")
+                os.environ.get("AEROTWIN_WEIGHTS_DIR", _default_weights_dir())
             ).resolve(),
             host=os.environ.get("AEROTWIN_HOST", "127.0.0.1"),
             port=int(os.environ.get("AEROTWIN_PORT", "8000")),
