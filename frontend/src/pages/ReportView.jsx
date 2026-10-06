@@ -202,7 +202,7 @@ export default function ReportView() {
                     {selectedReport.building_name}
                   </span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-slate-600">
-                    {selectedReport.format}
+                    {selectedReport.report_format}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600">
@@ -216,8 +216,8 @@ export default function ReportView() {
                   </div>
                   <div>
                     <span className="text-slate-400">File size:</span>{' '}
-                    {selectedReport.file_size_bytes
-                      ? `${(selectedReport.file_size_bytes / 1024).toFixed(1)} KB`
+                    {selectedReport.size_bytes
+                      ? `${(selectedReport.size_bytes / 1024).toFixed(1)} KB`
                       : '—'}
                   </div>
                   <div>
@@ -225,18 +225,21 @@ export default function ReportView() {
                   </div>
                 </div>
 
-                {selectedReport.file_path ? (
+                {selectedReport.pdf_path || selectedReport.json_path ? (
                   <div className="pt-2">
                     <a
                       href={artifactUrl(
                         'reports',
-                        selectedReport.file_path.replace(/^.*[\\/]reports[\\/]/i, '')
+                        (selectedReport.pdf_path || selectedReport.json_path).replace(
+                          /^.*[\\/]reports[\\/]/i,
+                          ''
+                        )
                       )}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center justify-center rounded-lg bg-slate-800 px-4 py-2 font-medium text-white hover:bg-slate-900"
                     >
-                      Download / Open {selectedReport.format.toUpperCase()}
+                      Download / Open {(selectedReport.report_format || '').toUpperCase()}
                     </a>
                   </div>
                 ) : null}
@@ -274,7 +277,7 @@ export default function ReportView() {
                       </div>
                     </div>
                     <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold uppercase text-slate-600">
-                      {r.format}
+                      {r.report_format}
                     </span>
                   </div>
                 ))}

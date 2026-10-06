@@ -31,8 +31,10 @@ export default function InspectionView() {
   async function loadVideos() {
     try {
       const list = await api.listVideos();
-      setVideos(list);
-      if (list.length > 0 && !selectedVideo) {
+      // Guard the payload before it reaches state so downstream .map()/.length
+      // in the uploader can never crash the view on a malformed response.
+      setVideos(Array.isArray(list) ? list : []);
+      if (Array.isArray(list) && list.length > 0 && !selectedVideo) {
         setSelectedVideo(list[0].filename);
       }
     } catch (err) {

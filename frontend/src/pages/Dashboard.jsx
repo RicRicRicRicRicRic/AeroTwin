@@ -14,22 +14,42 @@ export default function Dashboard({ onNavigate }) {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Fault-isolate every call: one failing endpoint (or a missing method)
+    // must never abort the batch — otherwise `setHealth` would never run and
+    // the badge would stay on "Backend Offline" even with a healthy sidecar.
+    const safe = (fn, fallback) => Promise.resolve().then(fn).catch(() => fallback);
+
     async function loadData() {
+      // Every response is coerced before it reaches state, so a malformed or
+      // error-shaped payload can never break .map()/.filter()/.slice()/.length
+      // during render.
+      const toArray = (value) => (Array.isArray(value) ? value : []);
       try {
         setLoading(true);
-        const [h, s, a, r, j] = await Promise.all([
-          api.health().catch(() => null),
-          api.getSystemStats().catch(() => null),
-          api.listAssessments().catch(() => []),
-          api.listReports().catch(() => []),
-          api.listJobs().catch(() => []),
+        const [h, a, r, j, p] = await Promise.all([
+          safe(() => api.health(), null),
+          safe(() => api.listAssessments(), []),
+          safe(() => api.listReports(), []),
+          safe(() => api.listJobs(), []),
+          safe(() => api.listProfiles(), []),
         ]);
         if (cancelled) return;
-        setHealth(h);
-        setStats(s);
-        setAssessments(a);
-        setReports(r);
-        setJobs(j);
+        const assessmentList = toArray(a);
+        const reportList = toArray(r);
+        const jobList = toArray(j);
+        setHealth(h && typeof h === 'object' ? h : null);
+        // No dedicated stats endpoint exists; derive the metric cards from the
+        // lists already fetched for the recent-activity panels.
+        setStats({
+          jobs_count: jobList.length,
+          assessments_count: assessmentList.length,
+          reports_count: reportList.length,
+          profiles_count: toArray(p).length,
+        });
+        setAssessments(assessmentList);
+        setReports(reportList);
+        setJobs(jobList);
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -192,25 +212,25 @@ export default function Dashboard({ onNavigate }) {
             ) : (
               <div className="divide-y divide-slate-100 overflow-hidden text-xs">
                 {jobs.slice(0, 5).map((job) => (
-                  <div key={job.job_id} className="flex items-center justify-between py-2">
+                  <div key={job?.job_id ?? Math.random()} className="flex items-center justify-between py-2">
                     <div>
                       <div className="font-medium capitalize text-slate-700">
-                        {job.job_type.replace(/_/g, ' ')}
+                        {String(job?.job_type ?? 'unknown').replace(/_/g, ' ')}
                       </div>
                       <div className="font-mono text-[10px] text-slate-400">
-                        {String(job.job_id).slice(0, 8)}
+                        {String(job?.job_id ?? '').slice(0, 8)}
                       </div>
                     </div>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        job.status === 'completed'
+                        job?.status === 'completed'
                           ? 'bg-emerald-50 text-emerald-700'
-                          : job.status === 'failed'
+                          : job?.status === 'failed'
                           ? 'bg-red-50 text-red-700'
                           : 'bg-amber-50 text-amber-700'
                       }`}
                     >
-                      {job.status}
+                      {job?.status ?? 'unknown'}
                     </span>
                   </div>
                 ))}
@@ -226,23 +246,26 @@ export default function Dashboard({ onNavigate }) {
             ) : (
               <div className="divide-y divide-slate-100 overflow-hidden text-xs">
                 {reports.slice(0, 5).map((rep) => (
-                  <div key={rep.report_id} className="flex items-center justify-between py-2">
+                  <div key={rep?.report_id ?? Math.random()} className="flex items-center justify-between py-2">
                     <div>
-                      <div className="font-medium text-slate-700">{rep.building_name}</div>
+                      <div className="font-medium text-slate-700">
+                        {rep?.building_name ?? 'Inspection report'}
+                      </div>
                       <div className="font-mono text-[10px] text-slate-400">
-                        {String(rep.report_id).slice(0, 8)} · {rep.format.toUpperCase()}
+                        {String(rep?.report_id ?? '').slice(0, 8)} ·{' '}
+                        {String(rep?.report_format ?? 'unknown')}
                       </div>
                     </div>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        rep.status === 'completed'
+                        rep?.status === 'completed'
                           ? 'bg-emerald-50 text-emerald-700'
-                          : rep.status === 'failed'
+                          : rep?.status === 'failed'
                           ? 'bg-red-50 text-red-700'
                           : 'bg-amber-50 text-amber-700'
                       }`}
                     >
-                      {rep.status}
+                      {rep?.status ?? 'unknown'}
                     </span>
                   </div>
                 ))}

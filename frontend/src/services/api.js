@@ -49,6 +49,32 @@ function readStoredBaseUrl() {
 
 let baseUrl = (readStoredBaseUrl() || DEFAULT_BASE_URL).replace(/\/+$/, '');
 
+// Electron runtime: the main process owns AEROTWIN_BACKEND_URL and exposes it
+// through the preload bridge (`aerotwin.getBackendUrl`). Adopt it only when no
+// explicit `?apiBaseUrl=`/persisted override was supplied, so plain local
+// development keeps defaulting to http://127.0.0.1:8000.
+try {
+  const bridge = typeof window !== 'undefined' ? window.aerotwin : null;
+  const hasOverride =
+    typeof window !== 'undefined' ? Boolean(window.localStorage.getItem(STORAGE_KEY)) : true;
+  if (!hasOverride && bridge && typeof bridge.getBackendUrl === 'function') {
+    Promise.resolve(bridge.getBackendUrl())
+      .then((url) => {
+        const resolved = String(url || '').trim().replace(/\/+$/, '');
+        const stillDefault =
+          typeof window !== 'undefined' && !window.localStorage.getItem(STORAGE_KEY);
+        if (resolved && stillDefault && baseUrl === DEFAULT_BASE_URL) {
+          baseUrl = resolved;
+        }
+      })
+      .catch(() => {
+        /* bridge unavailable — the default base URL still applies */
+      });
+  }
+} catch {
+  /* storage or bridge unavailable — the default base URL still applies */
+}
+
 export function getBaseUrl() {
   return baseUrl;
 }
@@ -168,6 +194,28 @@ export const api = {
         image_format: imageFormat,
       }),
     }),
+  /**
+   * Page-facing wrapper (InspectionView): sample at a target frame rate.
+   * Maps FPS onto the backend's XOR `seconds_interval` sampling mode.
+   */
+  extractFrames: (filename, fps) => {
+    const rate = Number(fps);
+    return api.startFrameExtraction({
+      filename,
+      secondsInterval: rate > 0 ? 1 / rate : 1,
+    });
+  },
+  /**
+   * The backend exposes no standalone frame-preprocessing endpoint (CLAHE & co.
+   * are not implemented server-side), so reject with a descriptive error the UI
+   * can render instead of an undefined-method TypeError.
+   */
+  preprocessFrames: () =>
+    Promise.reject(
+      new ApiError(
+        'Frame preprocessing is not exposed by this backend build — run the AI models directly on the extracted frames.'
+      )
+    ),
 
   // --- jobs ---------------------------------------------------------------
   listJobs: (limit = 25) => request(`/api/processing/jobs${query({ limit })}`),
@@ -190,6 +238,12 @@ export const api = {
       body: compact({ frames_path: framesPath, crack_threshold: crackThreshold }),
     }),
 
+  // Page-facing aliases (InspectionView call signatures).
+  segmentMaterials: (framesPath, options = {}) =>
+    api.startMaterialSegmentation({ framesPath, ...options }),
+  detectElements: (framesPath) => api.startElementDetection({ framesPath }),
+  mapCracks: (framesPath, options = {}) => api.startCrackMapping({ framesPath, ...options }),
+
   // --- cross-frame aggregation (global defect registry) ---------------------
   startAggregation: ({ crackJobId, elementJobId, iouThreshold, maxFrameGap, includeObservations }) =>
     request('/api/processing/aggregate-results', {
@@ -209,6 +263,17 @@ export const api = {
   createProfile: (payload) =>
     request('/api/assessment/profiles', { method: 'POST', body: payload }),
   getProfile: (profileId) => request(`/api/assessment/profiles/${encodeURIComponent(profileId)}`),
+
+  // Page-facing aliases (AssessmentView call signatures).
+  listBuildingProfiles: () => api.listProfiles(),
+  createBuildingProfile: (payload) => api.createProfile(payload),
+  createAssessment: ({ building_profile_id, profile_id, crack_job_id, element_job_id } = {}) =>
+    api.startAssessment({
+      profileId: profile_id || building_profile_id,
+      crackJobId: crack_job_id,
+      elementJobId: element_job_id,
+    }),
+
   startAssessment: ({ profileId, crackJobId, elementJobId }) =>
     request('/api/assessment/calculate', {
       method: 'POST',
@@ -223,14 +288,21 @@ export const api = {
     request(`/api/assessment/assessments/${encodeURIComponent(assessmentId)}`),
 
   // --- reports -------------------------------------------------------------
-  generateReport: ({ assessmentId, reportFormat = 'both', includeVisualMaps = true }) =>
+  generateReport: ({
+    assessmentId,
+    assessment_id,
+    reportFormat,
+    report_format,
+    format,
+    includeVisualMaps = true,
+  } = {}) =>
     request('/api/reports/generate', {
       method: 'POST',
-      body: {
-        assessment_id: assessmentId,
-        report_format: reportFormat,
+      body: compact({
+        assessment_id: assessment_id || assessmentId,
+        report_format: report_format || reportFormat || format || 'both',
         include_visual_maps: includeVisualMaps,
-      },
+      }),
     }),
   listReports: ({ assessmentId, limit = 25 } = {}) =>
     request(`/api/reports${query({ assessment_id: assessmentId, limit })}`),

@@ -3,6 +3,36 @@ import { useEffect, useState } from 'react';
 import ScoreCard from '../components/ScoreCard.jsx';
 import api, { waitForAssessment } from '../services/api.js';
 
+/**
+ * Map the profile form's fields onto the backend's `BuildingProfileCreate`
+ * schema (enum values, required `structure_age_years`, `num_stories`).
+ * The form's `address` has no backend column, so it is preserved in `notes`.
+ */
+function buildProfilePayload(form) {
+  const constructionMap = {
+    reinforced_concrete: 'rc_frame',
+    unreinforced_masonry: 'unreinforced_masonry',
+    confined_masonry: 'reinforced_masonry',
+    steel_frame: 'steel',
+    timber: 'timber',
+  };
+  const complianceMap = {
+    high: 'compliant',
+    moderate: 'partially_compliant',
+    low: 'non_compliant',
+  };
+  const year = Number(form.year_built);
+  const age = Number.isFinite(year) ? new Date().getFullYear() - year : 0;
+  return {
+    name: form.name,
+    structure_age_years: Math.min(150, Math.max(0, age)),
+    construction_type: constructionMap[form.construction_type] || 'unknown',
+    num_stories: Number(form.stories) || 1,
+    code_compliance: complianceMap[form.code_compliance] || 'unknown',
+    notes: form.address ? `Address: ${form.address}` : undefined,
+  };
+}
+
 export default function AssessmentView() {
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
@@ -44,7 +74,7 @@ export default function AssessmentView() {
       ]);
       setProfiles(pList);
       setAssessments(aList);
-      if (pList.length > 0) setSelectedProfileId(pList[0].profile_id);
+      if (pList.length > 0) setSelectedProfileId(pList[0].id);
       if (aList.length > 0) setSelectedAssessment(aList[0]);
     } catch (err) {
       console.error(err);
@@ -56,9 +86,9 @@ export default function AssessmentView() {
     setBusy(true);
     setError(null);
     try {
-      const created = await api.createBuildingProfile(profileForm);
+      const created = await api.createBuildingProfile(buildProfilePayload(profileForm));
       setProfiles((prev) => [created, ...prev]);
-      setSelectedProfileId(created.profile_id);
+      setSelectedProfileId(created.id);
       setStatusMessage(`Created profile: ${created.name}`);
     } catch (err) {
       setError(err.message);
@@ -126,8 +156,9 @@ export default function AssessmentView() {
               >
                 <option value="">-- Choose Profile --</option>
                 {profiles.map((p) => (
-                  <option key={p.profile_id} value={p.profile_id}>
-                    {p.name} ({p.construction_type}, built {p.year_built})
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.construction_type}, built{' '}
+                    {new Date().getFullYear() - Math.round(p.structure_age_years || 0)})
                   </option>
                 ))}
               </select>

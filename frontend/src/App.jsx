@@ -4,6 +4,7 @@ import AssessmentView from './pages/AssessmentView.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import InspectionView from './pages/InspectionView.jsx';
 import ReportView from './pages/ReportView.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -50,20 +51,21 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="absolute bottom-4 left-4 right-4 rounded-lg bg-slate-100 p-3 text-[11px] text-slate-500">
-          <div className="font-semibold text-slate-700">AeroTwin Framework</div>
-          <div className="mt-0.5">UAV Structural Assessment</div>
-          <div className="mt-1 font-mono text-[10px] text-slate-400">v1.0.0-phase5</div>
-        </div>
+
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl p-8">
-          {currentPage === 'dashboard' && <Dashboard onNavigate={(page) => setCurrentPage(page)} />}
-          {currentPage === 'inspection' && <InspectionView />}
-          {currentPage === 'assessment' && <AssessmentView />}
-          {currentPage === 'reports' && <ReportView />}
+          {/* Per-page error boundary: a render crash shows a friendly card
+              (with Reset) while the sidebar stays navigable. The `key` remounts
+              the boundary on navigation, clearing any captured error. */}
+          <ErrorBoundary key={currentPage}>
+            {currentPage === 'dashboard' && <Dashboard onNavigate={(page) => setCurrentPage(page)} />}
+            {currentPage === 'inspection' && <InspectionView />}
+            {currentPage === 'assessment' && <AssessmentView />}
+            {currentPage === 'reports' && <ReportView />}
+          </ErrorBoundary>
         </div>
       </main>
     </div>
