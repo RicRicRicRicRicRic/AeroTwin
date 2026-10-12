@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from .base import (
@@ -29,7 +30,7 @@ CRACK_WEIGHTS_FILENAME: str = "crack_model.pt"
 CRACK_CLASSES: tuple[str, ...] = ("background", "crack")
 DEFAULT_TILE_SIZE: int = 256
 DEFAULT_TILE_OVERLAP: int = 32
-DEFAULT_CRACK_THRESHOLD: float = 0.5
+DEFAULT_CRACK_THRESHOLD: float = 0.25
 JOB_TYPE_CRACK_MAPPING: str = "crack_mapping"
 
 
@@ -80,6 +81,13 @@ class CrackDetector:
 
     def predict_proba(self, image_bgr: np.ndarray) -> np.ndarray:
         """Return ``(2, H, W)`` background/crack probabilities for a BGR frame."""
+        h, w = image_bgr.shape[:2]
+        max_dim = 1024
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
         return model_predict_proba(
             self.model,
             image_bgr,

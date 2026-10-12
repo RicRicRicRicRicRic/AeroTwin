@@ -10,6 +10,8 @@ venv/
 data/**
 !data/**/
 !data/**/.gitkeep
+training/crack/dataset_cracks/
+training/crack/test_output
 
 # Node / Electron
 node_modules/
@@ -26,3 +28,4 @@ assets/installers/*
 .idea/
 .DS_Store
 Thumbs.db
+

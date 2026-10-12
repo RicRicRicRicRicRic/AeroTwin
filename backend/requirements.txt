@@ -11,6 +11,10 @@ numpy==2.4.6
 # install the CUDA build from https://download.pytorch.org/whl/cu126 when
 # enough disk space is available — the code auto-detects the device.
 torch==2.14.0
+# torchvision is required by training scripts (training/*/train_*.py) for
+# image transforms. Match the torch build (e.g. cu132 wheel from
+# https://download.pytorch.org/whl/cu132 when using the CUDA torch build).
+torchvision==0.29.1
 
 # Report generation (Phase 4: PDF inspection reports)
 reportlab==5.0.1
