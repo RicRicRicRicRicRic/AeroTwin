@@ -11,6 +11,9 @@ numpy==2.4.6
 # install the CUDA build from https://download.pytorch.org/whl/cu126 when
 # enough disk space is available — the code auto-detects the device.
 torch==2.14.0
+# Ultralytics YOLO — required to load Ultralytics segmentation checkpoints
+# (crack_model.pt, element_model.pt).
+ultralytics==8.4.215
 # torchvision is required by training scripts (training/*/train_*.py) for
 # image transforms. Match the torch build (e.g. cu132 wheel from
 # https://download.pytorch.org/whl/cu132 when using the CUDA torch build).

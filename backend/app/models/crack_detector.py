@@ -1,3 +1,4 @@
+
 """Crack detection model wrapper (Phase 3: AI-Based Analysis).
 
 Binary per-pixel crack segmentation (background vs. crack) with tiled
@@ -16,9 +17,8 @@ import cv2
 import numpy as np
 
 from .base import (
-    MiniUNet,
     ModelWeightsMissingError,
-    load_checkpoint,
+    load_model,
     model_predict_proba,
     require_weights,
     resolve_device,
@@ -30,8 +30,10 @@ CRACK_WEIGHTS_FILENAME: str = "crack_model.pt"
 CRACK_CLASSES: tuple[str, ...] = ("background", "crack")
 DEFAULT_TILE_SIZE: int = 256
 DEFAULT_TILE_OVERLAP: int = 32
-DEFAULT_CRACK_THRESHOLD: float = 0.25
+DEFAULT_CRACK_THRESHOLD: float = 0.10
 JOB_TYPE_CRACK_MAPPING: str = "crack_mapping"
+# Ultralytics class index → local class index: Ultralytics class 0 ("crack") → local index 1.
+CRACK_CLASS_MAP: dict[int, int] = {0: 1}
 
 
 def ensure_model_available(*, weights_dir: Path | None = None) -> Path:
@@ -65,12 +67,13 @@ class CrackDetector:
         self.threshold = threshold
         self.device = resolve_device(device)
         self.num_classes = len(CRACK_CLASSES)
-        self.model = MiniUNet(
-            in_channels=3,
-            num_classes=self.num_classes,
+        self.model = load_model(
+            weights_path,
+            self.num_classes,
+            self.device,
+            class_map=CRACK_CLASS_MAP,
             base_channels=base_channels,
         )
-        load_checkpoint(self.model, weights_path, self.device)
         logger.info(
             "CrackDetector ready | weights=%s device=%s tile=%d threshold=%.2f",
             weights_path.name,
@@ -82,11 +85,15 @@ class CrackDetector:
     def predict_proba(self, image_bgr: np.ndarray) -> np.ndarray:
         """Return ``(2, H, W)`` background/crack probabilities for a BGR frame."""
         h, w = image_bgr.shape[:2]
-        max_dim = 1024
+        max_dim = 1920
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
             new_w, new_h = int(w * scale), int(h * scale)
-            image_bgr = cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            image_bgr = cv2.resize(
+                image_bgr,
+                (new_w, new_h),
+                interpolation=cv2.INTER_AREA,
+            )
 
         return model_predict_proba(
             self.model,
@@ -98,9 +105,20 @@ class CrackDetector:
         )
 
     def predict(self, image_bgr: np.ndarray) -> np.ndarray:
-        """Return a ``(H, W)`` bool crack mask (crack probability ≥ threshold)."""
+        """Return a (H, W) bool crack mask with morphological closing applied."""
         probabilities = self.predict_proba(image_bgr)
-        return probabilities[1] >= self.threshold
+        mask = probabilities[1] >= self.threshold
+
+        # Larger kernel (9x9) bridges wider gaps along discontinuous cracks
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+        mask_uint8 = mask.astype(np.uint8) * 255
+        closed = cv2.morphologyEx(
+            mask_uint8,
+            cv2.MORPH_CLOSE,
+            kernel,
+        )
+
+        return closed > 0
 
     def predict_batch(self, images: list[np.ndarray]) -> list[np.ndarray]:
         """Sequential per-frame inference keeps peak memory at one tile-batch."""

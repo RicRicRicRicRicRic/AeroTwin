@@ -25,9 +25,8 @@ from ..core.database import update_job_record
 from ..schemas.processing import AnalysisRunManifest, JobStatus, MaterialSegmentationRequest
 from ..services.uav_preprocessor import list_run_frames
 from .base import (
-    MiniUNet,
     ModelWeightsMissingError,
-    load_checkpoint,
+    load_model,
     model_predict_proba,
     require_weights,
     resolve_device,
@@ -78,12 +77,12 @@ class MaterialSegmenter:
         self.tile_overlap = tile_overlap
         self.device = resolve_device(device)
         self.num_classes = len(MATERIAL_CLASSES)
-        self.model = MiniUNet(
-            in_channels=3,
-            num_classes=self.num_classes,
+        self.model = load_model(
+            weights_path,
+            self.num_classes,
+            self.device,
             base_channels=base_channels,
         )
-        load_checkpoint(self.model, weights_path, self.device)
         logger.info(
             "MaterialSegmenter ready | weights=%s device=%s tile=%d",
             weights_path.name,

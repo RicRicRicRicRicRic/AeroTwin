@@ -29,9 +29,8 @@ from ..schemas.processing import (
 )
 from ..services.uav_preprocessor import list_run_frames
 from .base import (
-    MiniUNet,
     ModelWeightsMissingError,
-    load_checkpoint,
+    load_model,
     model_predict_proba,
     require_weights,
     resolve_device,
@@ -46,6 +45,9 @@ DEFAULT_TILE_OVERLAP: int = 32
 #: Components smaller than this many pixels are treated as noise.
 MIN_COMPONENT_AREA: int = 16
 JOB_TYPE_ELEMENT_DETECTION: str = "element_detection"
+# Ultralytics class index → local class index:
+#   2 (column) → 1, 4 (beam) → 2, 3 (wall) → 3; window/door → background (0).
+ELEMENT_CLASS_MAP: dict[int, int] = {2: 1, 4: 2, 3: 3}
 
 
 def ensure_model_available(*, weights_dir: Path | None = None) -> Path:
@@ -77,12 +79,13 @@ class StructuralElementDetector:
         self.tile_overlap = tile_overlap
         self.device = resolve_device(device)
         self.num_classes = len(ELEMENT_CLASSES)
-        self.model = MiniUNet(
-            in_channels=3,
-            num_classes=self.num_classes,
+        self.model = load_model(
+            weights_path,
+            self.num_classes,
+            self.device,
+            class_map=ELEMENT_CLASS_MAP,
             base_channels=base_channels,
         )
-        load_checkpoint(self.model, weights_path, self.device)
         logger.info(
             "StructuralElementDetector ready | weights=%s device=%s tile=%d",
             weights_path.name,
