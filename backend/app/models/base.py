@@ -169,12 +169,18 @@ class TorchScriptModel:
 
         Indices outside ``[0, num_classes)`` (e.g. when the exported model was
         trained with more classes than the local :data:`MATERIAL_CLASSES`)
-        are treated as background.
+        are treated as background on a per-pixel basis.
         """
         if self.module is None:
             raise ModelLoadError("TorchScript module has not been loaded.")
+        # TorchScript segmentation models are typically exported from backbones
+        # trained with ImageNet normalisation; apply it here so the input
+        # distribution matches what the model expects.
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        normalized = (image_rgb - mean) / std
         tensor = (
-            torch.from_numpy(np.ascontiguousarray(image_rgb.transpose(2, 0, 1)))
+            torch.from_numpy(np.ascontiguousarray(normalized.transpose(2, 0, 1)))
             .unsqueeze(0)
             .to(self.device)
         )
@@ -187,10 +193,11 @@ class TorchScriptModel:
         probs = np.zeros((self.num_classes, h, w), dtype=np.float32)
         for c in range(self.num_classes):
             probs[c] = (indices == c).astype(np.float32)
-        # If no local class matched any pixel (all indices out of range),
-        # fall back to background so probabilities sum to 1.
-        if probs.sum(axis=0).max() == 0.0:
-            probs[0] = 1.0
+        # Per-pixel fallback: pixels whose predicted index is outside
+        # [0, num_classes) receive background probability 1.0.
+        pixel_sum = probs.sum(axis=0)  # (H, W): 1.0 where a local class matched
+        unmatched = pixel_sum == 0.0
+        probs[0] = np.where(unmatched, 1.0, probs[0])
         return probs
 
     def eval(self) -> None:

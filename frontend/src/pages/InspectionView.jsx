@@ -42,7 +42,12 @@ export default function InspectionView() {
     }
   }
 
-  const framesRun = preprocJob?.output_dir || extractJob?.output_dir || '';
+  // Derive the frames-run path relative to data/processed/frames/ so viewers
+  // can construct correct frame URLs (e.g. "ph3_video/run_unit" not just "run_unit").
+  const framesRunRaw = preprocJob?.output_dir || extractJob?.output_dir || '';
+  const framesRun = framesRunRaw
+    ? framesRunRaw.replace(/^.*[\\/]frames[\\/]/, '').replace(/\\/g, '/')
+    : '';
 
   async function runExtract() {
     if (!selectedVideo) return;
@@ -325,22 +330,13 @@ export default function InspectionView() {
         </div>
 
         {activeTab === 'cracks' && (
-          <CrackViewer
-            framesRun={framesRun ? framesRun.replace(/^.*[\\/]/, '') : ''}
-            job={crackJob}
-          />
+          <CrackViewer framesRun={framesRun} job={crackJob} />
         )}
         {activeTab === 'material' && (
-          <MaterialMap
-            framesRun={framesRun ? framesRun.replace(/^.*[\\/]/, '') : ''}
-            job={materialJob}
-          />
+          <MaterialMap framesRun={framesRun} job={materialJob} />
         )}
         {activeTab === 'elements' && (
-          <StructuralElementViewer
-            framesRun={framesRun ? framesRun.replace(/^.*[\\/]/, '') : ''}
-            job={elementJob}
-          />
+          <StructuralElementViewer framesRun={framesRun} job={elementJob} />
         )}
       </div>
     </div>

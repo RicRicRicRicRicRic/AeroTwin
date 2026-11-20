@@ -1,9 +1,20 @@
 """Structural element detection model wrapper (Phase 3: AI-Based Analysis).
 
-Detects load-bearing elements (columns, beams, walls) as semantic masks and
-derives per-element bounding boxes via connected components. Weights load from
-``backend/app/models/weights/element_model.pt``; absent weights surface as a
-descriptive HTTP 503 through the API layer.
+Detects structural elements (window, door, column, wall, beam) as instance
+segmentation masks using an Ultralytics YOLOv8n-seg checkpoint. Weights load
+from ``backend/app/models/weights/element_model.pt``; absent weights surface as
+a descriptive HTTP 503 through the API layer.
+
+The checkpoint is *not* a TorchScript model.  It is loaded with
+``ultralytics.YOLO`` and inference uses ``model.predict()``.  Instance masks
+from ``result.masks.data`` are combined with their detection class IDs from
+``result.boxes.cls`` to produce a per-frame class-index mask.
+
+The actual checkpoint classes are:
+    0 → window, 1 → door, 2 → column, 3 → wall, 4 → beam
+
+Categories such as slab, shear_wall, and masonry_infill are *not* among the
+model's trained classes and must not be reported as detections.
 """
 
 from __future__ import annotations
@@ -30,8 +41,6 @@ from ..schemas.processing import (
 from ..services.uav_preprocessor import list_run_frames
 from .base import (
     ModelWeightsMissingError,
-    load_model,
-    model_predict_proba,
     require_weights,
     resolve_device,
 )
@@ -39,15 +48,32 @@ from .base import (
 logger = logging.getLogger("aerotwin.models.elements")
 
 ELEMENT_WEIGHTS_FILENAME: str = "element_model.pt"
-ELEMENT_CLASSES: tuple[str, ...] = ("background", "column", "beam", "wall")
-DEFAULT_TILE_SIZE: int = 256
+
+# Actual checkpoint classes (class ID → name).
+ELEMENT_CLASSES: tuple[str, ...] = (
+    "background",
+    "window",
+    "door",
+    "column",
+    "wall",
+    "beam",
+)
+
+# Ultralytics class index → local class index (0 = background).
+# Ultralytics: 0=window, 1=door, 2=column, 3=wall, 4=beam.
+ELEMENT_CLASS_MAP: dict[int, int] = {
+    0: 1,  # window → local 1
+    1: 2,  # door → local 2
+    2: 3,  # column → local 3
+    3: 4,  # wall → local 4
+    4: 5,  # beam → local 5
+}
+
+DEFAULT_TILE_SIZE: int = 640
 DEFAULT_TILE_OVERLAP: int = 32
 #: Components smaller than this many pixels are treated as noise.
 MIN_COMPONENT_AREA: int = 16
 JOB_TYPE_ELEMENT_DETECTION: str = "element_detection"
-# Ultralytics class index → local class index:
-#   2 (column) → 1, 4 (beam) → 2, 3 (wall) → 3; window/door → background (0).
-ELEMENT_CLASS_MAP: dict[int, int] = {2: 1, 4: 2, 3: 3}
 
 
 def ensure_model_available(*, weights_dir: Path | None = None) -> Path:
@@ -56,7 +82,7 @@ def ensure_model_available(*, weights_dir: Path | None = None) -> Path:
 
 
 class StructuralElementDetector:
-    """Element mask + bounding-box detection with tiled inference."""
+    """Element instance-segmentation + bounding-box detection via Ultralytics YOLO."""
 
     def __init__(
         self,
@@ -79,13 +105,29 @@ class StructuralElementDetector:
         self.tile_overlap = tile_overlap
         self.device = resolve_device(device)
         self.num_classes = len(ELEMENT_CLASSES)
-        self.model = load_model(
-            weights_path,
-            self.num_classes,
-            self.device,
-            class_map=ELEMENT_CLASS_MAP,
-            base_channels=base_channels,
-        )
+
+        # Load with Ultralytics YOLO — NOT TorchScript, NOT MiniUNet.
+        try:
+            from ultralytics import YOLO
+
+            logger.info(
+                "Loading YOLOv8-seg model from %s", self.weights_path
+            )
+            self.model = YOLO(str(self.weights_path))
+            self.model.to(self.device)
+            logger.info(
+                "YOLO model loaded | weights=%s task=%s names=%s device=%s",
+                self.weights_path.name,
+                getattr(self.model.model, "task", "unknown"),
+                self.model.names,
+                self.device,
+            )
+        except ImportError as exc:
+            raise ModelWeightsMissingError(
+                "Ultralytics checkpoints require the ``ultralytics`` package; "
+                "install it with ``pip install ultralytics``."
+            ) from exc
+
         logger.info(
             "StructuralElementDetector ready | weights=%s device=%s tile=%d",
             weights_path.name,
@@ -93,52 +135,134 @@ class StructuralElementDetector:
             tile_size,
         )
 
-    def predict_proba(self, image_bgr: np.ndarray) -> np.ndarray:
-        """Return ``(C, H, W)`` element-class probabilities for a BGR frame."""
-        return model_predict_proba(
-            self.model,
-            image_bgr,
-            num_classes=self.num_classes,
-            tile_size=self.tile_size,
-            tile_overlap=self.tile_overlap,
-            device=self.device,
+    def detect(self, image_bgr: np.ndarray) -> tuple[np.ndarray, list[DetectedElement]]:
+        """Run YOLOv8-seg inference and return a class-index mask + detections.
+
+        Returns:
+            mask: ``(H, W)`` int64 array with local class indices (0-5).
+            elements: list of :class:`DetectedElement` for each instance.
+        """
+        h, w = image_bgr.shape[:2]
+        logger.debug(
+            "Detecting | frame_size=(%d, %d) conf=0.25 imgsz=%d", w, h, self.tile_size
         )
 
-    def predict(self, image_bgr: np.ndarray) -> np.ndarray:
-        """Return an ``(H, W)`` int64 map of :data:`ELEMENT_CLASSES` indices."""
-        return np.argmax(self.predict_proba(image_bgr), axis=0).astype(np.int64)
+        results = self.model.predict(
+            source=image_bgr,
+            conf=0.25,
+            imgsz=self.tile_size,
+            verbose=False,
+        )
 
-    def detect(self, image_bgr: np.ndarray) -> tuple[np.ndarray, list[DetectedElement]]:
-        """Segment the frame and extract labelled bounding boxes.
+        result = results[0]
 
-        Each non-background class mask is split with connected components;
-        boxes below :data:`MIN_COMPONENT_AREA` pixels are dropped and the
-        confidence is the mean class probability inside the component.
-        """
-        probabilities = self.predict_proba(image_bgr)
-        mask = np.argmax(probabilities, axis=0).astype(np.int64)
+        # Log detection summary.
+        num_boxes = 0 if result.boxes is None else len(result.boxes)
+        masks_exist = result.masks is not None and result.masks.data is not None
+        logger.info(
+            "Detections | num_instances=%d masks_exist=%s",
+            num_boxes, masks_exist,
+        )
+
+        # Build class-index mask from instance masks.
+        mask = np.zeros((h, w), dtype=np.int64)
         elements: list[DetectedElement] = []
-        for class_index, label in enumerate(ELEMENT_CLASSES[1:], start=1):
-            class_mask = (mask == class_index).astype(np.uint8)
-            if not class_mask.any():
-                continue
-            count, labels, stats, _ = cv2.connectedComponentsWithStats(class_mask, connectivity=8)
-            for component in range(1, count):
-                x, y, width, height, area = (int(value) for value in stats[component])
-                if area < MIN_COMPONENT_AREA:
-                    continue
-                confidence = float(probabilities[class_index][labels == component].mean())
-                elements.append(
-                    DetectedElement(
-                        label=label,
-                        x=x,
-                        y=y,
-                        width=width,
-                        height=height,
-                        confidence=round(min(max(confidence, 0.0), 1.0), 4),
-                    )
+
+        if result.boxes is None or num_boxes == 0:
+            logger.warning("No detections in frame — mask is all background (0).")
+            return mask, elements
+
+        if not masks_exist:
+            logger.error(
+                "result.masks is None — mask extraction failed. "
+                "This may indicate the checkpoint is not a segmentation model."
+            )
+            return mask, elements
+
+        # Extract per-instance data.
+        boxes = result.boxes
+        cls_ids = boxes.cls.cpu().numpy().astype(int)
+        confs = boxes.conf.cpu().numpy()
+        mask_data = result.masks.data.cpu().numpy()  # (num_instances, H_inf, W_inf)
+
+        logger.debug(
+            "Instance masks | shape=%s dtype=%s class_ids=%s confs=%s",
+            mask_data.shape, mask_data.dtype, cls_ids.tolist(),
+            np.round(confs, 3).tolist(),
+        )
+
+        # Resize instance masks to original frame dimensions if needed.
+        if mask_data.shape[-2:] != (h, w):
+            mask_data_resized = np.stack([
+                cv2.resize(
+                    m.astype(np.float32), (w, h),
+                    interpolation=cv2.INTER_NEAREST,
+                ) > 0.5
+                for m in mask_data
+            ])
+        else:
+            mask_data_resized = mask_data > 0.5
+
+        # Combine instance masks: highest-confidence instance wins per pixel.
+        # Sort by confidence ascending so higher-confidence instances overwrite.
+        order = np.argsort(confs)
+        foreground_pixels = np.zeros((h, w), dtype=bool)
+        class_counts: dict[int, int] = {cid: 0 for cid in range(1, self.num_classes)}
+
+        for idx in order:
+            cls_id = int(cls_ids[idx])
+            conf = float(confs[idx])
+            inst_mask = mask_data_resized[idx]
+
+            local_idx = ELEMENT_CLASS_MAP.get(cls_id, 0)
+            if local_idx == 0:
+                # Class not in class map (e.g. window/door not mapped) → skip
+                logger.debug(
+                    "Skipping class %d (not in ELEMENT_CLASS_MAP)", cls_id
                 )
+                continue
+
+            # Only write where this instance has foreground and no higher-conf
+            # instance has already claimed the pixel.
+            new_pixels = inst_mask & ~foreground_pixels
+            mask[new_pixels] = local_idx
+            foreground_pixels |= inst_mask
+
+            class_counts[local_idx] = class_counts.get(local_idx, 0) + int(new_pixels.sum())
+
+            # Extract bounding box for this instance.
+            x1, y1, x2, y2 = boxes.xyxy[idx].cpu().numpy().astype(int)
+            elements.append(
+                DetectedElement(
+                    label=ELEMENT_CLASSES[local_idx],
+                    x=int(x1),
+                    y=int(y1),
+                    width=int(x2 - x1),
+                    height=int(y2 - y1),
+                    confidence=round(conf, 4),
+                )
+            )
+
+        # Log per-class foreground pixel counts.
+        total = h * w
+        for local_idx in range(1, self.num_classes):
+            count = class_counts.get(local_idx, 0)
+            pct = count / total * 100 if total > 0 else 0.0
+            logger.info(
+                "Class %s (%d): %d pixels (%.2f%%)",
+                ELEMENT_CLASSES[local_idx], local_idx, count, pct,
+            )
+
+        logger.info(
+            "Saved mask | shape=%s unique=%s min=%d max=%d",
+            mask.shape, np.unique(mask).tolist(), int(mask.min()), int(mask.max()),
+        )
+
         return mask, elements
+
+    def predict_batch(self, images: list[np.ndarray]) -> list[np.ndarray]:
+        """Sequential per-frame inference."""
+        return [self.detect(image)[0] for image in images]
 
 
 def run_element_detection_job(
